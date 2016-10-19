@@ -40,8 +40,8 @@ void triangle_example::cb_create() {
 }
 
 void triangle_example::setup_shader_modules() {
-    vert_shader_module_ = load_shader_module(get_device().get_handle(), "triangle_vert.spv");
-    frag_shader_module_ = load_shader_module(get_device().get_handle(), "triangle_frag.spv");
+    vert_shader_module_ = load_shader_module(get_device().get_handle(), "./resources/triangle.vert.spv");
+    frag_shader_module_ = load_shader_module(get_device().get_handle(), "./resources/triangle.frag.spv");
 }
 
 void triangle_example::setup_renderpass() {
