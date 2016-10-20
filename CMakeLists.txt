@@ -39,7 +39,9 @@ add_executable(main ${SRC_MAIN} ${SRC_AVIS_ALL} ${INC_AVIS_ALL})
 target_link_libraries(main glfw ${LIB_VULKAN})
 
 # shaders
-compile_spirv_shader("${CMAKE_CURRENT_SOURCE_DIR}/resources/triangle.vert" "resources/triangle.vert.spv")
-compile_spirv_shader("${CMAKE_CURRENT_SOURCE_DIR}/resources/triangle.frag" "resources/triangle.frag.spv")
-add_custom_target(shaders DEPENDS "resources/triangle.vert.spv" "resources/triangle.frag.spv")
+set(DIR_RESOURCES ${CMAKE_CURRENT_BINARY_DIR}/resources)
+file(MAKE_DIRECTORY ${DIR_RESOURCES})
+compile_spirv_shader("${CMAKE_CURRENT_SOURCE_DIR}/resources/triangle.vert" "${DIR_RESOURCES}/triangle.vert.spv")
+compile_spirv_shader("${CMAKE_CURRENT_SOURCE_DIR}/resources/triangle.frag" "${DIR_RESOURCES}/triangle.frag.spv")
+add_custom_target(shaders DEPENDS "${DIR_RESOURCES}/triangle.vert.spv" "${DIR_RESOURCES}/triangle.frag.spv")
 add_dependencies(main shaders)
