@@ -357,7 +357,10 @@ void triangle_example::cb_display() {
     status = vkAcquireNextImageKHR(get_device().get_handle(), get_swapchain().get_swapchain(),
             std::numeric_limits<std::uint64_t>::max(), sem_img_available_.get_handle(), nullptr, &image_index);
 
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+    if (status == VK_ERROR_OUT_OF_DATE_KHR || status == VK_SUBOPTIMAL_KHR)
+        return;
+    if (status != VK_SUCCESS)
+        throw vulkan::exception(vulkan::to_result(status));
 
     VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 
