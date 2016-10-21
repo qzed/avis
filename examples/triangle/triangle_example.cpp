@@ -1,4 +1,4 @@
-#include <avis/triangle_example.hpp>
+#include "triangle_example.hpp"
 
 #include <avis/vulkan/shader.hpp>
 #include <avis/utils/fileio.hpp>

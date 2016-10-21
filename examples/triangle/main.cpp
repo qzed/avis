@@ -1,6 +1,6 @@
-#include <avis/glfw/initializer.hpp>
-#include <avis/triangle_example.hpp>
+#include "triangle_example.hpp"
 
+#include <avis/glfw/initializer.hpp>
 #include <iostream>
 
 
@@ -11,7 +11,7 @@ int main() {
     appinfo.app_name                   = "avis-vk";
     appinfo.app_version                = VK_MAKE_VERSION(1, 0, 0);
 
-    appinfo.window_title               = "Audio Visualization using Vulkan";
+    appinfo.window_title               = "Vulkan Triangle Example";
     appinfo.window_width               = 1920;
     appinfo.window_height              = 1080;
     appinfo.window_resizable           = true;
