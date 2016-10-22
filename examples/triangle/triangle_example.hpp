@@ -2,9 +2,25 @@
 
 #include <avis/application_base.hpp>
 #include <avis/vulkan/command_buffers.hpp>
+#include <array>
 
 
 namespace avis {
+
+struct vertex {
+    float pos[2];
+    float color[3];
+
+    static auto get_binding_description()    -> VkVertexInputBindingDescription;
+    static auto get_attribute_descriptions() -> std::array<VkVertexInputAttributeDescription, 2>;
+};
+
+constexpr auto vertices = std::array<vertex, 3>{{
+    {{ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{ 0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{-0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}}
+}};
+
 
 class triangle_example final : private application_base {
 public:
@@ -30,6 +46,7 @@ private:
     void setup_pipeline();
     void setup_framebuffers();
     void setup_command_pool();
+    void setup_vertex_buffer();
     void setup_command_buffers();
     void setup_semaphores();
 
@@ -42,9 +59,12 @@ private:
     vulkan::handle<VkPipeline>                   pipeline_;
     std::vector<vulkan::handle<VkFramebuffer>>   framebuffers_;
     vulkan::handle<VkCommandPool>                command_pool_;
+    vulkan::handle<VkDeviceMemory>               vertex_buffer_memory_;
+    vulkan::handle<VkBuffer>                     vertex_buffer_;
     vulkan::command_buffers                      command_buffers_;
     vulkan::handle<VkSemaphore>                  sem_img_available_;
     vulkan::handle<VkSemaphore>                  sem_img_finished_;
+
 };
 
 } /* namespace avis */

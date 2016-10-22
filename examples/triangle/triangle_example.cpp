@@ -3,6 +3,7 @@
 #include <avis/vulkan/shader.hpp>
 #include <avis/utils/fileio.hpp>
 #include <iostream>
+#include <cstring>
 
 
 namespace avis {
@@ -25,7 +26,40 @@ auto create_semaphore(VkDevice device, VkAllocationCallbacks const* alloc) -> vu
     });
 }
 
+auto find_memory_type_index(VkPhysicalDeviceMemoryProperties mem, std::uint32_t bits, VkMemoryPropertyFlags properties) -> int {
+    for (int i = 0; i < mem.memoryTypeCount; i++)
+        if ((bits & (1u << i)) && ((mem.memoryTypes[i].propertyFlags & properties) == properties))
+            return i;
+
+    return -1;
+}
+
 } /* namespace */
+
+
+auto vertex::get_binding_description() -> VkVertexInputBindingDescription {
+    VkVertexInputBindingDescription desc = {};
+    desc.binding   = 0;
+    desc.stride    = sizeof(vertex);
+    desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    return desc;
+}
+
+auto vertex::get_attribute_descriptions() -> std::array<VkVertexInputAttributeDescription, 2> {
+    auto desc = std::array<VkVertexInputAttributeDescription, 2>{};
+
+    desc[0].binding  = 0;
+    desc[0].location = 0;
+    desc[0].format   = VK_FORMAT_R32G32_SFLOAT;
+    desc[0].offset   = offsetof(vertex, pos);
+
+    desc[1].binding  = 0;
+    desc[1].location = 1;
+    desc[1].format   = VK_FORMAT_R32G32B32_SFLOAT;
+    desc[1].offset   = offsetof(vertex, color);
+
+    return desc;
+}
 
 
 void triangle_example::cb_create() {
@@ -35,6 +69,7 @@ void triangle_example::cb_create() {
     setup_pipeline();
     setup_framebuffers();
     setup_command_pool();
+    setup_vertex_buffer();
     setup_command_buffers();
     setup_semaphores();
 }
@@ -115,6 +150,7 @@ void triangle_example::setup_pipeline_layout() {
 void triangle_example::setup_pipeline() {
     VkDevice device = get_device().get_handle();
 
+    // shader
     VkPipelineShaderStageCreateInfo vert_shader_stage_info = {};
     vert_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vert_shader_stage_info.stage  = VK_SHADER_STAGE_VERTEX_BIT;
@@ -129,18 +165,24 @@ void triangle_example::setup_pipeline() {
 
     VkPipelineShaderStageCreateInfo shader_stages[] = {vert_shader_stage_info, frag_shader_stage_info};
 
+    // vertex input
+    auto vertex_binding = vertex::get_binding_description();
+    auto vertex_attribs = vertex::get_attribute_descriptions();
+
     VkPipelineVertexInputStateCreateInfo vertex_input_info = {};
     vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertex_input_info.vertexBindingDescriptionCount   = 0;
-    vertex_input_info.pVertexBindingDescriptions      = nullptr;
-    vertex_input_info.vertexAttributeDescriptionCount = 0;
-    vertex_input_info.pVertexAttributeDescriptions    = nullptr;
+    vertex_input_info.vertexBindingDescriptionCount   = 1;
+    vertex_input_info.pVertexBindingDescriptions      = &vertex_binding;
+    vertex_input_info.vertexAttributeDescriptionCount = vertex_attribs.size();
+    vertex_input_info.pVertexAttributeDescriptions    = vertex_attribs.data();
 
+    // input assembly
     VkPipelineInputAssemblyStateCreateInfo input_assembly_info = {};
     input_assembly_info.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     input_assembly_info.topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     input_assembly_info.primitiveRestartEnable = false;
 
+    // viewport and scissor
     VkViewport viewport = {};
     viewport.x        = 0.0f;
     viewport.y        = 0.0f;
@@ -160,6 +202,7 @@ void triangle_example::setup_pipeline() {
     viewport_state.scissorCount  = 1;
     viewport_state.pScissors     = &scissor;
 
+    // rasterizer
     VkPipelineRasterizationStateCreateInfo rasterizer = {};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable        = false;
@@ -170,6 +213,7 @@ void triangle_example::setup_pipeline() {
     rasterizer.frontFace               = VK_FRONT_FACE_CLOCKWISE;
     rasterizer.depthBiasEnable         = false;
 
+    // multisampling
     VkPipelineMultisampleStateCreateInfo multisampling = {};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable   = true;
@@ -179,6 +223,7 @@ void triangle_example::setup_pipeline() {
     multisampling.alphaToCoverageEnable = false;
     multisampling.alphaToOneEnable      = false;
 
+    // blending
     VkPipelineColorBlendAttachmentState color_blend_attachment = {};
     color_blend_attachment.colorWriteMask
             = VK_COLOR_COMPONENT_R_BIT
@@ -210,6 +255,7 @@ void triangle_example::setup_pipeline() {
     // dynamic_state.dynamicStateCount = 2;
     // dynamic_state.pDynamicStates = dynamic_states;
 
+    // create pipeline
     VkGraphicsPipelineCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     create_info.stageCount = 2;
@@ -285,6 +331,63 @@ void triangle_example::setup_command_pool() {
     }).move_or_throw();
 }
 
+void triangle_example::setup_vertex_buffer() {
+    auto status = VK_SUCCESS;
+    auto device = get_device().get_handle();
+
+    // create buffer
+    auto buffer_info = VkBufferCreateInfo{};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size        = sizeof(vertices[0]) * vertices.size();
+    buffer_info.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    auto handle = VkBuffer{nullptr};
+    status = vkCreateBuffer(device, &buffer_info, nullptr, &handle);
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    auto buffer = vulkan::make_handle(handle, nullptr, [=](auto h, auto a){
+        vkDestroyBuffer(device, h, a);
+    }).move_or_throw();
+
+    // allocate buffer memory
+    auto mem_requirements = VkMemoryRequirements{};
+    vkGetBufferMemoryRequirements(device, buffer.get_handle(), &mem_requirements);
+
+    auto mem_properties = VkPhysicalDeviceMemoryProperties{};
+    vkGetPhysicalDeviceMemoryProperties(get_device().get_physical_device(), &mem_properties);
+
+    auto flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    auto index = find_memory_type_index(mem_properties, mem_requirements.memoryTypeBits, flags);
+    if (index < 0) throw std::runtime_error("could not find suitable memory type");
+
+    auto alloc_info = VkMemoryAllocateInfo{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize  = mem_requirements.size;
+    alloc_info.memoryTypeIndex = index;
+
+    auto mem_handle = VkDeviceMemory{nullptr};
+    status = vkAllocateMemory(device, &alloc_info, nullptr, &mem_handle);
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    auto memory = vulkan::make_handle(mem_handle, nullptr, [=](auto h, auto a){
+        vkFreeMemory(device, h, a);
+    }).move_or_throw();
+
+    // bind memory
+    vkBindBufferMemory(device, buffer.get_handle(), memory.get_handle(), 0);
+
+    // map and fill buffer
+    void* data = nullptr;
+    status = vkMapMemory(device, memory.get_handle(), 0, buffer_info.size, 0, &data);
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+    std::memcpy(data, vertices.data(), buffer_info.size);
+    vkUnmapMemory(device, memory.get_handle());
+
+    vertex_buffer_memory_ = std::move(memory);
+    vertex_buffer_        = std::move(buffer);
+}
+
 void triangle_example::setup_command_buffers() {
     // create command buffers
     VkCommandBufferAllocateInfo alloc_info = {};
@@ -320,7 +423,12 @@ void triangle_example::setup_command_buffers() {
 
         vkCmdBeginRenderPass(buffer, &pass_info, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.get_handle());
+
+        VkBuffer vertex_buffers[] = {vertex_buffer_.get_handle()};
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(buffer, 0, 1, vertex_buffers, offsets);
         vkCmdDraw(buffer, 3, 1, 0, 0);
+
         vkCmdEndRenderPass(buffer);
 
         status = vkEndCommandBuffer(buffer);
@@ -334,6 +442,7 @@ void triangle_example::setup_semaphores() {
     sem_img_available_ = create_semaphore(get_device().get_handle(), nullptr).move_or_throw();
     sem_img_finished_  = create_semaphore(get_device().get_handle(), nullptr).move_or_throw();
 }
+
 
 
 void triangle_example::cb_destroy() {
