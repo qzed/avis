@@ -15,11 +15,16 @@ struct vertex {
     static auto get_attribute_descriptions() -> std::array<VkVertexInputAttributeDescription, 2>;
 };
 
-constexpr auto vertices = std::array<vertex, 3>{{
-    {{ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-    {{ 0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},
-    {{-0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}}
-}};
+const std::vector<vertex> vertices = {
+    {{-0.75f, -0.75f}, {1.0f, 0.0f, 0.0f}},
+    {{ 0.75f, -0.75f}, {0.0f, 1.0f, 0.0f}},
+    {{ 0.75f,  0.75f}, {0.0f, 0.0f, 1.0f}},
+    {{-0.75f,  0.75f}, {1.0f, 1.0f, 1.0f}}
+};
+
+const std::vector<uint16_t> indices = {
+    1, 2, 0, 3
+};
 
 
 class triangle_example final : private application_base {

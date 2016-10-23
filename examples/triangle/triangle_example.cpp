@@ -179,8 +179,8 @@ void triangle_example::setup_pipeline() {
     // input assembly
     VkPipelineInputAssemblyStateCreateInfo input_assembly_info = {};
     input_assembly_info.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    input_assembly_info.topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    input_assembly_info.primitiveRestartEnable = false;
+    input_assembly_info.topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    input_assembly_info.primitiveRestartEnable = true;
 
     // viewport and scissor
     VkViewport viewport = {};
@@ -335,57 +335,167 @@ void triangle_example::setup_vertex_buffer() {
     auto status = VK_SUCCESS;
     auto device = get_device().get_handle();
 
-    // create buffer
-    auto buffer_info = VkBufferCreateInfo{};
-    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_info.size        = sizeof(vertices[0]) * vertices.size();
-    buffer_info.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkDeviceSize vertex_buffer_size = sizeof(vertices[0]) * vertices.size();
+    VkDeviceSize index_buffer_size  = sizeof(indices[0]) * indices.size();
 
-    auto handle = VkBuffer{nullptr};
-    status = vkCreateBuffer(device, &buffer_info, nullptr, &handle);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+    // host-accessible staging buffer
+    auto staging_buffer = vulkan::handle<VkBuffer>{};
+    auto staging_buffer_memory = vulkan::handle<VkDeviceMemory>{};
+    {
+        // create vertex buffer
+        auto buffer_info = VkBufferCreateInfo{};
+        buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        buffer_info.size        = vertex_buffer_size + index_buffer_size;
+        buffer_info.usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    auto buffer = vulkan::make_handle(handle, nullptr, [=](auto h, auto a){
-        vkDestroyBuffer(device, h, a);
-    }).move_or_throw();
+        auto handle = VkBuffer{nullptr};
+        status = vkCreateBuffer(device, &buffer_info, nullptr, &handle);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
 
-    // allocate buffer memory
-    auto mem_requirements = VkMemoryRequirements{};
-    vkGetBufferMemoryRequirements(device, buffer.get_handle(), &mem_requirements);
+        staging_buffer = vulkan::make_handle(handle, nullptr, [=](auto h, auto a){
+            vkDestroyBuffer(device, h, a);
+        }).move_or_throw();
 
-    auto mem_properties = VkPhysicalDeviceMemoryProperties{};
-    vkGetPhysicalDeviceMemoryProperties(get_device().get_physical_device(), &mem_properties);
+        // allocate buffer memory
+        auto mem_requirements = VkMemoryRequirements{};
+        vkGetBufferMemoryRequirements(device, staging_buffer.get_handle(), &mem_requirements);
 
-    auto flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    auto index = find_memory_type_index(mem_properties, mem_requirements.memoryTypeBits, flags);
-    if (index < 0) throw std::runtime_error("could not find suitable memory type");
+        auto mem_properties = VkPhysicalDeviceMemoryProperties{};
+        vkGetPhysicalDeviceMemoryProperties(get_device().get_physical_device(), &mem_properties);
 
-    auto alloc_info = VkMemoryAllocateInfo{};
-    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc_info.allocationSize  = mem_requirements.size;
-    alloc_info.memoryTypeIndex = index;
+        auto flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        auto index = find_memory_type_index(mem_properties, mem_requirements.memoryTypeBits, flags);
+        if (index < 0) throw std::runtime_error("could not find suitable memory type");
 
-    auto mem_handle = VkDeviceMemory{nullptr};
-    status = vkAllocateMemory(device, &alloc_info, nullptr, &mem_handle);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+        auto alloc_info = VkMemoryAllocateInfo{};
+        alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc_info.allocationSize  = mem_requirements.size;
+        alloc_info.memoryTypeIndex = index;
 
-    auto memory = vulkan::make_handle(mem_handle, nullptr, [=](auto h, auto a){
-        vkFreeMemory(device, h, a);
-    }).move_or_throw();
+        auto mem_handle = VkDeviceMemory{nullptr};
+        status = vkAllocateMemory(device, &alloc_info, nullptr, &mem_handle);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
 
-    // bind memory
-    vkBindBufferMemory(device, buffer.get_handle(), memory.get_handle(), 0);
+        staging_buffer_memory = vulkan::make_handle(mem_handle, nullptr, [=](auto h, auto a){
+            vkFreeMemory(device, h, a);
+        }).move_or_throw();
 
-    // map and fill buffer
-    void* data = nullptr;
-    status = vkMapMemory(device, memory.get_handle(), 0, buffer_info.size, 0, &data);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-    std::memcpy(data, vertices.data(), buffer_info.size);
-    vkUnmapMemory(device, memory.get_handle());
+        // bind memory
+        vkBindBufferMemory(device, staging_buffer.get_handle(), staging_buffer_memory.get_handle(), 0);
 
-    vertex_buffer_memory_ = std::move(memory);
-    vertex_buffer_        = std::move(buffer);
+        // map and fill vertex buffer
+        {
+            void* data = nullptr;
+            status = vkMapMemory(device, staging_buffer_memory.get_handle(), 0, vertex_buffer_size, 0, &data);
+            if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+            std::memcpy(data, vertices.data(), vertex_buffer_size);
+            vkUnmapMemory(device, staging_buffer_memory.get_handle());
+        }
+
+        // map and fill index buffer
+        {
+            void* data = nullptr;
+            status = vkMapMemory(device, staging_buffer_memory.get_handle(), vertex_buffer_size, index_buffer_size, 0, &data);
+            if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+            std::memcpy(data, indices.data(), index_buffer_size);
+            vkUnmapMemory(device, staging_buffer_memory.get_handle());
+        }
+    }
+
+    // device-local vertex buffer
+    auto vertex_buffer        = vulkan::handle<VkBuffer>{};
+    auto vertex_buffer_memory = vulkan::handle<VkDeviceMemory>{};
+    {
+        // create vertex buffer
+        auto buffer_info = VkBufferCreateInfo{};
+        buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        buffer_info.size        = vertex_buffer_size + index_buffer_size;
+        buffer_info.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+                                  | VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+                                  | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        auto handle = VkBuffer{nullptr};
+        status = vkCreateBuffer(device, &buffer_info, nullptr, &handle);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+        vertex_buffer = vulkan::make_handle(handle, nullptr, [=](auto h, auto a){
+            vkDestroyBuffer(device, h, a);
+        }).move_or_throw();
+
+        // allocate buffer memory
+        auto mem_requirements = VkMemoryRequirements{};
+        vkGetBufferMemoryRequirements(device, vertex_buffer.get_handle(), &mem_requirements);
+
+        auto mem_properties = VkPhysicalDeviceMemoryProperties{};
+        vkGetPhysicalDeviceMemoryProperties(get_device().get_physical_device(), &mem_properties);
+
+        auto flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+        auto index = find_memory_type_index(mem_properties, mem_requirements.memoryTypeBits, flags);
+        if (index < 0) throw std::runtime_error("could not find suitable memory type");
+
+        auto alloc_info = VkMemoryAllocateInfo{};
+        alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc_info.allocationSize  = mem_requirements.size;
+        alloc_info.memoryTypeIndex = index;
+
+        auto mem_handle = VkDeviceMemory{nullptr};
+        status = vkAllocateMemory(device, &alloc_info, nullptr, &mem_handle);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+        vertex_buffer_memory = vulkan::make_handle(mem_handle, nullptr, [=](auto h, auto a){
+            vkFreeMemory(device, h, a);
+        }).move_or_throw();
+
+        // bind memory
+        vkBindBufferMemory(device, vertex_buffer.get_handle(), vertex_buffer_memory.get_handle(), 0);
+    }
+
+    // transfer from staging to device-local buffer
+    {
+        // create command buffer
+        auto alloc_info = VkCommandBufferAllocateInfo{};
+        alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc_info.commandPool        = command_pool_.get_handle();
+        alloc_info.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc_info.commandBufferCount = 1;
+        auto cmdbufs = vulkan::command_buffers::create(get_device().get_handle(), alloc_info).move_or_throw();
+        auto cmdbuf = cmdbufs[0];
+
+        // write copy-command to command-buffer
+        auto begin_info = VkCommandBufferBeginInfo{};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        status = vkBeginCommandBuffer(cmdbuf, &begin_info);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+        auto bufcpy = VkBufferCopy{};
+        bufcpy.srcOffset = 0;
+        bufcpy.dstOffset = 0;
+        bufcpy.size      = vertex_buffer_size + index_buffer_size;
+
+        vkCmdCopyBuffer(cmdbuf, staging_buffer.get_handle(), vertex_buffer.get_handle(), 1, &bufcpy);
+
+        status = vkEndCommandBuffer(cmdbuf);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+        // submit command buffer
+        auto submit_info = VkSubmitInfo{};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers    = &cmdbuf;
+
+        status = vkQueueSubmit(get_device().get_graphics_queue(), 1, &submit_info, nullptr);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+        status = vkQueueWaitIdle(get_device().get_graphics_queue());
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+    }
+
+    vertex_buffer_memory_ = std::move(vertex_buffer_memory);
+    vertex_buffer_        = std::move(vertex_buffer);
 }
 
 void triangle_example::setup_command_buffers() {
@@ -427,7 +537,12 @@ void triangle_example::setup_command_buffers() {
         VkBuffer vertex_buffers[] = {vertex_buffer_.get_handle()};
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(buffer, 0, 1, vertex_buffers, offsets);
-        vkCmdDraw(buffer, 3, 1, 0, 0);
+
+        VkDeviceSize index_offset = sizeof(vertices[0]) * vertices.size();
+        vkCmdBindIndexBuffer(buffer, vertex_buffer_.get_handle(), index_offset, VK_INDEX_TYPE_UINT16);
+
+        vkCmdDrawIndexed(buffer, indices.size(), 1, 0, 0, 0);
+        //vkCmdDraw(buffer, 3, 1, 0, 0);
 
         vkCmdEndRenderPass(buffer);
 
@@ -442,8 +557,6 @@ void triangle_example::setup_semaphores() {
     sem_img_available_ = create_semaphore(get_device().get_handle(), nullptr).move_or_throw();
     sem_img_finished_  = create_semaphore(get_device().get_handle(), nullptr).move_or_throw();
 }
-
-
 
 void triangle_example::cb_destroy() {
     sem_img_available_.destroy();
