@@ -540,9 +540,8 @@ void triangle_example::setup_command_buffers() {
 
         VkDeviceSize index_offset = sizeof(vertices[0]) * vertices.size();
         vkCmdBindIndexBuffer(buffer, vertex_buffer_.get_handle(), index_offset, VK_INDEX_TYPE_UINT16);
-
+        
         vkCmdDrawIndexed(buffer, indices.size(), 1, 0, 0, 0);
-        //vkCmdDraw(buffer, 3, 1, 0, 0);
 
         vkCmdEndRenderPass(buffer);
 
