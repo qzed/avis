@@ -15,16 +15,18 @@ struct vertex {
     static auto get_attribute_descriptions() -> std::array<VkVertexInputAttributeDescription, 2>;
 };
 
-const std::vector<vertex> vertices = {
+const auto vertices = std::vector<vertex>{
     {{-0.75f, -0.75f}, {0.4784f, 0.5882f, 0.2431f}},
     {{ 0.75f, -0.75f}, {0.4784f, 0.5882f, 0.2431f}},
     {{ 0.75f,  0.75f}, {0.1725f, 0.2509f, 0.3137f}},
     {{-0.75f,  0.75f}, {0.1725f, 0.2509f, 0.3137f}}
 };
 
-const std::vector<uint16_t> indices = {
+const auto indices = std::vector<uint16_t>{
     1, 2, 0, 3
 };
+
+constexpr auto texture_extent = VkExtent3D{600, 400, 1};
 
 
 class triangle_example final : private application_base {
@@ -52,6 +54,7 @@ private:
     void setup_framebuffers();
     void setup_command_pool();
     void setup_vertex_buffer();
+    void setup_texture();
     void setup_command_buffers();
     void setup_semaphores();
 
@@ -66,6 +69,8 @@ private:
     vulkan::handle<VkCommandPool>                command_pool_;
     vulkan::handle<VkDeviceMemory>               vertex_buffer_memory_;
     vulkan::handle<VkBuffer>                     vertex_buffer_;
+    vulkan::handle<VkDeviceMemory>               texture_memory_;
+    vulkan::handle<VkImage>                      texture_image_;
     vulkan::command_buffers                      command_buffers_;
     vulkan::handle<VkSemaphore>                  sem_img_available_;
     vulkan::handle<VkSemaphore>                  sem_img_finished_;

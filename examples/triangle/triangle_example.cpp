@@ -2,8 +2,11 @@
 
 #include <avis/vulkan/shader.hpp>
 #include <avis/utils/fileio.hpp>
+
 #include <iostream>
 #include <cstring>
+#include <algorithm>
+#include <random>
 
 
 namespace avis {
@@ -70,6 +73,7 @@ void triangle_example::cb_create() {
     setup_framebuffers();
     setup_command_pool();
     setup_vertex_buffer();
+    setup_texture();
     setup_command_buffers();
     setup_semaphores();
 }
@@ -498,6 +502,79 @@ void triangle_example::setup_vertex_buffer() {
     vertex_buffer_        = std::move(vertex_buffer);
 }
 
+void triangle_example::setup_texture() {
+    auto status = VK_SUCCESS;
+    auto const device = get_device().get_handle();
+
+    // create texture image
+    auto image_info = VkImageCreateInfo{};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType     = VK_IMAGE_TYPE_2D;
+    image_info.extent        = texture_extent;
+    image_info.mipLevels     = 1;
+    image_info.arrayLayers   = 1;
+    image_info.format        = VK_FORMAT_R8G8B8A8_UINT;
+    image_info.tiling        = VK_IMAGE_TILING_LINEAR;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    image_info.usage         = VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+    image_info.samples       = VK_SAMPLE_COUNT_1_BIT;
+    image_info.flags         = 0;
+
+    auto handle = VkImage{nullptr};
+    status = vkCreateImage(device, &image_info, nullptr, &handle);
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    auto tex_image = vulkan::make_handle(handle, nullptr, [=](auto... p) {
+        vkDestroyImage(device, p...);
+    }).move_or_throw();
+
+    // create texture memory
+    auto device_memory = VkPhysicalDeviceMemoryProperties{};
+    vkGetPhysicalDeviceMemoryProperties(get_device().get_physical_device(), &device_memory);
+
+    auto mem_requirements = VkMemoryRequirements{};
+    vkGetImageMemoryRequirements(device, tex_image.get_handle(), &mem_requirements);
+
+    auto mem_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    auto mem_index = find_memory_type_index(device_memory, mem_requirements.memoryTypeBits, mem_flags);
+
+    auto alloc_info = VkMemoryAllocateInfo{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize  = mem_requirements.size;
+    alloc_info.memoryTypeIndex = mem_index;
+
+    auto mem_handle = VkDeviceMemory{nullptr};
+    status = vkAllocateMemory(device, &alloc_info, nullptr, &mem_handle);
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    auto tex_memory = vulkan::make_handle(mem_handle, nullptr, [=](auto... p){
+        vkFreeMemory(device, p...);
+    }).move_or_throw();
+
+    // bind memory
+    status = vkBindImageMemory(device, tex_image.get_handle(), tex_memory.get_handle(), 0);
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    // load memory
+    void* data;
+    VkDeviceSize size = texture_extent.width * texture_extent.height * 4;
+    status = vkMapMemory(device, tex_memory.get_handle(), 0, size, 0, &data);
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    auto rnd_gen  = std::mt19937{std::random_device{}()};
+    auto rnd_dist = std::uniform_int_distribution<std::uint8_t>{};
+    std::generate(static_cast<std::uint8_t*>(data), static_cast<std::uint8_t*>(data) + size, [&](){
+        return rnd_dist(rnd_gen);
+    });
+
+    vkUnmapMemory(device, tex_memory.get_handle());
+
+    // set handles
+    texture_image_  = std::move(tex_image);
+    texture_memory_ = std::move(tex_memory);
+}
+
 void triangle_example::setup_command_buffers() {
     // create command buffers
     VkCommandBufferAllocateInfo alloc_info = {};
@@ -540,7 +617,7 @@ void triangle_example::setup_command_buffers() {
 
         VkDeviceSize index_offset = sizeof(vertices[0]) * vertices.size();
         vkCmdBindIndexBuffer(buffer, vertex_buffer_.get_handle(), index_offset, VK_INDEX_TYPE_UINT16);
-        
+
         vkCmdDrawIndexed(buffer, indices.size(), 1, 0, 0, 0);
 
         vkCmdEndRenderPass(buffer);
