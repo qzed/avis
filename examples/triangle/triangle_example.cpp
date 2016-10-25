@@ -58,8 +58,8 @@ auto vertex::get_attribute_descriptions() -> std::array<VkVertexInputAttributeDe
 
     desc[1].binding  = 0;
     desc[1].location = 1;
-    desc[1].format   = VK_FORMAT_R32G32B32_SFLOAT;
-    desc[1].offset   = offsetof(vertex, color);
+    desc[1].format   = VK_FORMAT_R32G32_SFLOAT;
+    desc[1].offset   = offsetof(vertex, texcoord);
 
     return desc;
 }
@@ -68,6 +68,7 @@ auto vertex::get_attribute_descriptions() -> std::array<VkVertexInputAttributeDe
 void triangle_example::cb_create() {
     setup_shader_modules();
     setup_renderpass();
+    setup_descriptors();
     setup_pipeline_layout();
     setup_pipeline();
     setup_framebuffers();
@@ -132,13 +133,75 @@ void triangle_example::setup_renderpass() {
     }).move_or_throw();
 }
 
+void triangle_example::setup_descriptors() {
+    auto device = get_device().get_handle();
+    auto status = VK_SUCCESS;
+
+    // setup descriptor layout
+    auto sampler_binding = VkDescriptorSetLayoutBinding{};
+    sampler_binding.binding            = 0;
+    sampler_binding.descriptorCount    = 1;
+    sampler_binding.descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    sampler_binding.stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
+    sampler_binding.pImmutableSamplers = nullptr;
+
+    auto layout_info = VkDescriptorSetLayoutCreateInfo{};
+    layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_info.bindingCount = 1;
+    layout_info.pBindings    = &sampler_binding;
+
+    auto layout_handle = VkDescriptorSetLayout{nullptr};
+    status = vkCreateDescriptorSetLayout(device, &layout_info, nullptr, &layout_handle);
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    auto layout = vulkan::make_handle(layout_handle, nullptr, [=](auto... p){
+        vkDestroyDescriptorSetLayout(device, p...);
+    }).move_or_throw();
+
+    auto pool_size = VkDescriptorPoolSize{};
+    pool_size.type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    pool_size.descriptorCount = 1;
+
+    // setup descriptor pool
+    auto pool_info = VkDescriptorPoolCreateInfo{};
+    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    pool_info.poolSizeCount = 1;
+    pool_info.pPoolSizes    = &pool_size;
+    pool_info.maxSets       = 1;
+
+    auto pool_handle = VkDescriptorPool{nullptr};
+    status = vkCreateDescriptorPool(device, &pool_info, nullptr, &pool_handle);
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    auto pool = vulkan::make_handle(pool_handle, nullptr, [=](auto... p){
+        vkDestroyDescriptorPool(device, p...);
+    }).move_or_throw();
+
+    // setup descriptor set
+    auto alloc_info = VkDescriptorSetAllocateInfo{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    alloc_info.descriptorPool     = pool_handle;
+    alloc_info.descriptorSetCount = 1;
+    alloc_info.pSetLayouts        = &layout_handle;
+
+    auto set_handle = VkDescriptorSet{nullptr};
+    status = vkAllocateDescriptorSets(device, &alloc_info, &set_handle);
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    descriptor_layout_ = std::move(layout);
+    descriptor_pool_   = std::move(pool);
+    descriptor_set_    = set_handle;
+}
+
 void triangle_example::setup_pipeline_layout() {
     VkDevice device = get_device().get_handle();
 
+    VkDescriptorSetLayout layouts[] = { descriptor_layout_.get_handle() };
+
     VkPipelineLayoutCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    create_info.setLayoutCount         = 0;
-    create_info.pSetLayouts            = nullptr;
+    create_info.setLayoutCount         = 1;
+    create_info.pSetLayouts            = layouts;
     create_info.pushConstantRangeCount = 0;
     create_info.pPushConstantRanges    = nullptr;
 
@@ -214,7 +277,7 @@ void triangle_example::setup_pipeline() {
     rasterizer.polygonMode             = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth               = 1.0f;
     rasterizer.cullMode                = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace               = VK_FRONT_FACE_CLOCKWISE;
+    rasterizer.frontFace               = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizer.depthBiasEnable         = false;
 
     // multisampling
@@ -506,73 +569,213 @@ void triangle_example::setup_texture() {
     auto status = VK_SUCCESS;
     auto const device = get_device().get_handle();
 
-    // create texture image
-    auto image_info = VkImageCreateInfo{};
-    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    image_info.imageType     = VK_IMAGE_TYPE_2D;
-    image_info.extent        = texture_extent;
-    image_info.mipLevels     = 1;
-    image_info.arrayLayers   = 1;
-    image_info.format        = VK_FORMAT_R8G8B8A8_UINT;
-    image_info.tiling        = VK_IMAGE_TILING_LINEAR;
-    image_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
-    image_info.usage         = VK_IMAGE_USAGE_SAMPLED_BIT;
-    image_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
-    image_info.samples       = VK_SAMPLE_COUNT_1_BIT;
-    image_info.flags         = 0;
+    auto tex_image  = vulkan::handle<VkImage>{};
+    auto tex_memory = vulkan::handle<VkDeviceMemory>{};
+    {
+        // create texture image
+        auto image_info = VkImageCreateInfo{};
+        image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        image_info.imageType     = VK_IMAGE_TYPE_2D;
+        image_info.extent        = texture_extent;
+        image_info.mipLevels     = 1;
+        image_info.arrayLayers   = 1;
+        image_info.format        = VK_FORMAT_R8G8B8A8_UNORM;
+        image_info.tiling        = VK_IMAGE_TILING_LINEAR;
+        image_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+        image_info.usage         = VK_IMAGE_USAGE_SAMPLED_BIT;
+        image_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+        image_info.samples       = VK_SAMPLE_COUNT_1_BIT;
+        image_info.flags         = 0;
 
-    auto handle = VkImage{nullptr};
-    status = vkCreateImage(device, &image_info, nullptr, &handle);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+        auto handle = VkImage{nullptr};
+        status = vkCreateImage(device, &image_info, nullptr, &handle);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
 
-    auto tex_image = vulkan::make_handle(handle, nullptr, [=](auto... p) {
-        vkDestroyImage(device, p...);
-    }).move_or_throw();
+        tex_image = vulkan::make_handle(handle, nullptr, [=](auto... p) {
+            vkDestroyImage(device, p...);
+        }).move_or_throw();
 
-    // create texture memory
-    auto device_memory = VkPhysicalDeviceMemoryProperties{};
-    vkGetPhysicalDeviceMemoryProperties(get_device().get_physical_device(), &device_memory);
+        // create texture memory
+        auto device_memory = VkPhysicalDeviceMemoryProperties{};
+        vkGetPhysicalDeviceMemoryProperties(get_device().get_physical_device(), &device_memory);
 
-    auto mem_requirements = VkMemoryRequirements{};
-    vkGetImageMemoryRequirements(device, tex_image.get_handle(), &mem_requirements);
+        auto mem_requirements = VkMemoryRequirements{};
+        vkGetImageMemoryRequirements(device, tex_image.get_handle(), &mem_requirements);
 
-    auto mem_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    auto mem_index = find_memory_type_index(device_memory, mem_requirements.memoryTypeBits, mem_flags);
+        auto mem_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        auto mem_index = find_memory_type_index(device_memory, mem_requirements.memoryTypeBits, mem_flags);
 
-    auto alloc_info = VkMemoryAllocateInfo{};
-    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc_info.allocationSize  = mem_requirements.size;
-    alloc_info.memoryTypeIndex = mem_index;
+        auto alloc_info = VkMemoryAllocateInfo{};
+        alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc_info.allocationSize  = mem_requirements.size;
+        alloc_info.memoryTypeIndex = mem_index;
 
-    auto mem_handle = VkDeviceMemory{nullptr};
-    status = vkAllocateMemory(device, &alloc_info, nullptr, &mem_handle);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+        auto mem_handle = VkDeviceMemory{nullptr};
+        status = vkAllocateMemory(device, &alloc_info, nullptr, &mem_handle);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
 
-    auto tex_memory = vulkan::make_handle(mem_handle, nullptr, [=](auto... p){
-        vkFreeMemory(device, p...);
-    }).move_or_throw();
+        tex_memory = vulkan::make_handle(mem_handle, nullptr, [=](auto... p){
+            vkFreeMemory(device, p...);
+        }).move_or_throw();
 
-    // bind memory
-    status = vkBindImageMemory(device, tex_image.get_handle(), tex_memory.get_handle(), 0);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+        // bind memory
+        status = vkBindImageMemory(device, tex_image.get_handle(), tex_memory.get_handle(), 0);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
 
-    // load memory
-    void* data;
-    VkDeviceSize size = texture_extent.width * texture_extent.height * 4;
-    status = vkMapMemory(device, tex_memory.get_handle(), 0, size, 0, &data);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+        // load memory
+        void* data;
+        VkDeviceSize size = texture_extent.width * texture_extent.height * 4;
+        status = vkMapMemory(device, tex_memory.get_handle(), 0, size, 0, &data);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
 
-    auto rnd_gen  = std::mt19937{std::random_device{}()};
-    auto rnd_dist = std::uniform_int_distribution<std::uint8_t>{};
-    std::generate(static_cast<std::uint8_t*>(data), static_cast<std::uint8_t*>(data) + size, [&](){
-        return rnd_dist(rnd_gen);
-    });
+        auto rnd_gen  = std::mt19937{std::random_device{}()};
+        auto rnd_dist = std::uniform_int_distribution<std::uint8_t>{};
+        std::generate(static_cast<std::uint8_t*>(data), static_cast<std::uint8_t*>(data) + size, [&](){
+            return rnd_dist(rnd_gen);
+        });
 
-    vkUnmapMemory(device, tex_memory.get_handle());
+        vkUnmapMemory(device, tex_memory.get_handle());
+    }
+
+    // prepare for use: transition image layout
+    {
+        // prepare for use: create memory barrier to transform layout
+        auto barrier = VkImageMemoryBarrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.oldLayout           = VK_IMAGE_LAYOUT_PREINITIALIZED;
+        barrier.newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image               = tex_image.get_handle();
+
+        barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseMipLevel   = 0;
+        barrier.subresourceRange.levelCount     = 1;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount     = 1;
+
+        barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        // prepare for use: place barrier
+        auto alloc_info = VkCommandBufferAllocateInfo{};
+        alloc_info.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc_info.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc_info.commandPool        = command_pool_.get_handle();
+        alloc_info.commandBufferCount = 1;
+
+        auto cmdbufs = vulkan::command_buffers::create(device, alloc_info).move_or_throw();
+        auto cmdbuf = cmdbufs[0];
+
+        auto begin_info = VkCommandBufferBeginInfo{};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        status = vkBeginCommandBuffer(cmdbuf, &begin_info);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+        vkCmdPipelineBarrier(
+            cmdbuf,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            0,
+            0, nullptr,
+            0, nullptr,
+            1, &barrier
+        );
+
+        status = vkEndCommandBuffer(cmdbuf);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+        auto submit_info = VkSubmitInfo{};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers    = &cmdbuf;
+
+        status = vkQueueSubmit(get_device().get_graphics_queue(), 1, &submit_info, nullptr);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+        status = vkQueueWaitIdle(get_device().get_graphics_queue());
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+    }
+
+    // create image view
+    auto tex_view = vulkan::handle<VkImageView>{};
+    {
+        auto view_info = VkImageViewCreateInfo{};
+        view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_info.image    = tex_image.get_handle();
+        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_info.format   = VK_FORMAT_R8G8B8A8_UNORM;
+
+        view_info.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_info.subresourceRange.baseMipLevel   = 0;
+        view_info.subresourceRange.levelCount     = 1;
+        view_info.subresourceRange.baseArrayLayer = 0;
+        view_info.subresourceRange.layerCount     = 1;
+
+        auto handle = VkImageView{nullptr};
+        status = vkCreateImageView(device, &view_info, nullptr, &handle);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+        tex_view = vulkan::make_handle(handle, nullptr, [=](auto... p){
+            vkDestroyImageView(device, p...);
+        }).move_or_throw();
+    }
+
+    // create sampler
+    auto tex_sampler = vulkan::handle<VkSampler>{};
+    {
+        auto sampler_info = VkSamplerCreateInfo{};
+        sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampler_info.magFilter               = VK_FILTER_NEAREST;
+        sampler_info.minFilter               = VK_FILTER_NEAREST;
+        sampler_info.addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        sampler_info.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        sampler_info.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        sampler_info.anisotropyEnable        = true;
+        sampler_info.maxAnisotropy           = 16;
+        sampler_info.borderColor             = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        sampler_info.unnormalizedCoordinates = false;
+        sampler_info.compareEnable           = false;
+        sampler_info.compareOp               = VK_COMPARE_OP_ALWAYS;
+        sampler_info.mipmapMode              = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sampler_info.mipLodBias              = 0.0f;
+        sampler_info.minLod                  = 0.0f;
+        sampler_info.maxLod                  = 0.0f;
+
+        auto handle = VkSampler{nullptr};
+        status = vkCreateSampler(device, &sampler_info, nullptr, &handle);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+        tex_sampler = vulkan::make_handle(handle, nullptr, [=](auto... p){
+            vkDestroySampler(device, p...);
+        }).move_or_throw();
+    }
+
+    // sampler uniform binding
+    {
+        auto image_info = VkDescriptorImageInfo{};
+        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        image_info.imageView   = tex_view.get_handle();
+        image_info.sampler     = tex_sampler.get_handle();
+
+        auto descriptor_write = VkWriteDescriptorSet{};
+        descriptor_write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptor_write.dstSet          = descriptor_set_;
+        descriptor_write.dstBinding      = 0;
+        descriptor_write.dstArrayElement = 0;
+        descriptor_write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptor_write.descriptorCount = 1;
+        descriptor_write.pImageInfo      = &image_info;
+
+        vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, nullptr);
+    }
 
     // set handles
-    texture_image_  = std::move(tex_image);
-    texture_memory_ = std::move(tex_memory);
+    texture_image_   = std::move(tex_image);
+    texture_memory_  = std::move(tex_memory);
+    texture_view_    = std::move(tex_view);
+    texture_sampler_ = std::move(tex_sampler);
 }
 
 void triangle_example::setup_command_buffers() {
@@ -610,6 +813,8 @@ void triangle_example::setup_command_buffers() {
 
         vkCmdBeginRenderPass(buffer, &pass_info, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindPipeline(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.get_handle());
+        vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_.get_handle(), 0, 1,
+                &descriptor_set_, 0, nullptr);
 
         VkBuffer vertex_buffers[] = {vertex_buffer_.get_handle()};
         VkDeviceSize offsets[] = {0};

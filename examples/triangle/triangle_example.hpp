@@ -9,24 +9,24 @@ namespace avis {
 
 struct vertex {
     float pos[2];
-    float color[3];
+    float texcoord[2];
 
     static auto get_binding_description()    -> VkVertexInputBindingDescription;
     static auto get_attribute_descriptions() -> std::array<VkVertexInputAttributeDescription, 2>;
 };
 
 const auto vertices = std::vector<vertex>{
-    {{-0.75f, -0.75f}, {0.4784f, 0.5882f, 0.2431f}},
-    {{ 0.75f, -0.75f}, {0.4784f, 0.5882f, 0.2431f}},
-    {{ 0.75f,  0.75f}, {0.1725f, 0.2509f, 0.3137f}},
-    {{-0.75f,  0.75f}, {0.1725f, 0.2509f, 0.3137f}}
+    {{-0.75f, -0.75f}, {0.0f, 0.0f}},
+    {{-0.75f,  0.75f}, {0.0f, 1.0f}},
+    {{ 0.75f,  0.75f}, {1.0f, 1.0f}},
+    {{ 0.75f, -0.75f}, {1.0f, 0.0f}},
 };
 
 const auto indices = std::vector<uint16_t>{
     1, 2, 0, 3
 };
 
-constexpr auto texture_extent = VkExtent3D{600, 400, 1};
+constexpr auto texture_extent = VkExtent3D{200, 100, 1};
 
 
 class triangle_example final : private application_base {
@@ -49,6 +49,7 @@ private:
 
     void setup_renderpass();
     void setup_shader_modules();
+    void setup_descriptors();
     void setup_pipeline_layout();
     void setup_pipeline();
     void setup_framebuffers();
@@ -63,6 +64,9 @@ private:
     vulkan::handle<VkShaderModule>               frag_shader_module_;
 
     vulkan::handle<VkRenderPass>                 renderpass_;
+    vulkan::handle<VkDescriptorSetLayout>        descriptor_layout_;
+    vulkan::handle<VkDescriptorPool>             descriptor_pool_;
+    VkDescriptorSet                              descriptor_set_;
     vulkan::handle<VkPipelineLayout>             pipeline_layout_;
     vulkan::handle<VkPipeline>                   pipeline_;
     std::vector<vulkan::handle<VkFramebuffer>>   framebuffers_;
@@ -71,6 +75,8 @@ private:
     vulkan::handle<VkBuffer>                     vertex_buffer_;
     vulkan::handle<VkDeviceMemory>               texture_memory_;
     vulkan::handle<VkImage>                      texture_image_;
+    vulkan::handle<VkImageView>                  texture_view_;
+    vulkan::handle<VkSampler>                    texture_sampler_;
     vulkan::command_buffers                      command_buffers_;
     vulkan::handle<VkSemaphore>                  sem_img_available_;
     vulkan::handle<VkSemaphore>                  sem_img_finished_;
