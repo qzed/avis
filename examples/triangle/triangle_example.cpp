@@ -7,6 +7,7 @@
 #include <cstring>
 #include <algorithm>
 #include <random>
+#include <chrono>
 
 
 namespace avis {
@@ -854,6 +855,9 @@ void triangle_example::cb_destroy() {
 }
 
 void triangle_example::cb_display() {
+    using clock = std::chrono::high_resolution_clock;
+    auto start_frame = clock::now();
+
     VkResult status = VK_SUCCESS;
 
     std::uint32_t image_index = 0;
@@ -898,6 +902,9 @@ void triangle_example::cb_display() {
 
     status = vkQueuePresentKHR(get_device().get_present_queue(), &present_info);
     if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    auto delta_frame = clock::now() - start_frame;
+    std::cout << "frame-time: " << std::chrono::duration_cast<std::chrono::microseconds>(delta_frame).count() << u8"µs\n";
 }
 
 void triangle_example::cb_resize(unsigned int width, unsigned int height) noexcept {
