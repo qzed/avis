@@ -26,7 +26,7 @@ const auto indices = std::vector<uint16_t>{
     1, 2, 0, 3
 };
 
-constexpr auto texture_extent = VkExtent3D{4096, 1048, 1};
+constexpr auto texture_extent = VkExtent3D{4096, 1024, 1};
 constexpr auto texture_bytes  = texture_extent.width * texture_extent.height * texture_extent.depth * 4;
 
 
@@ -35,7 +35,7 @@ public:
     triangle_example(application_info const& appinfo)
             : application_base(appinfo)
             , paused_{false}
-            , tex_update_offset_{0} {}
+            , texture_offset_{0} {}
 
     using application_base::create;
     using application_base::destroy;
@@ -59,12 +59,13 @@ private:
     void setup_command_pool();
     void setup_vertex_buffer();
     void setup_texture();
+    void setup_uniform_buffer();
     void setup_command_buffers();
     void setup_semaphores();
 
 private:
     bool         paused_;
-    VkDeviceSize tex_update_offset_;
+    std::int32_t texture_offset_;
 
     vulkan::handle<VkShaderModule>               vert_shader_module_;
     vulkan::handle<VkShaderModule>               frag_shader_module_;
@@ -83,6 +84,8 @@ private:
     vulkan::handle<VkImage>                      texture_image_;
     vulkan::handle<VkImageView>                  texture_view_;
     vulkan::handle<VkSampler>                    texture_sampler_;
+    vulkan::handle<VkBuffer>                     ubo_buffer_;
+    vulkan::handle<VkDeviceMemory>               ubo_buffer_memory_;
     vulkan::command_buffers                      command_buffers_;
     vulkan::handle<VkSemaphore>                  sem_img_available_;
     vulkan::handle<VkSemaphore>                  sem_img_finished_;

@@ -80,6 +80,7 @@ void triangle_example::cb_create() {
     setup_command_pool();
     setup_vertex_buffer();
     setup_texture();
+    setup_uniform_buffer();
     setup_command_buffers();
     setup_semaphores();
 }
@@ -142,7 +143,7 @@ void triangle_example::setup_descriptors() {
     auto device = get_device().get_handle();
     auto status = VK_SUCCESS;
 
-    // setup descriptor layout
+    // setup descriptor layout: texture
     auto sampler_binding = VkDescriptorSetLayoutBinding{};
     sampler_binding.binding            = 0;
     sampler_binding.descriptorCount    = 1;
@@ -150,10 +151,21 @@ void triangle_example::setup_descriptors() {
     sampler_binding.stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
     sampler_binding.pImmutableSamplers = nullptr;
 
+    // setup descriptor layout: texture-offset
+    auto offset_binding = VkDescriptorSetLayoutBinding{};
+    offset_binding.binding            = 1;
+    offset_binding.descriptorCount    = 1;
+    offset_binding.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    offset_binding.stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
+    offset_binding.pImmutableSamplers = nullptr;
+
+    // setup descriptor layout
+    auto bindings = std::array<VkDescriptorSetLayoutBinding, 2>{{ sampler_binding, offset_binding }};
+
     auto layout_info = VkDescriptorSetLayoutCreateInfo{};
     layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_info.bindingCount = 1;
-    layout_info.pBindings    = &sampler_binding;
+    layout_info.bindingCount = bindings.size();
+    layout_info.pBindings    = bindings.data();
 
     auto layout_handle = VkDescriptorSetLayout{nullptr};
     status = vkCreateDescriptorSetLayout(device, &layout_info, nullptr, &layout_handle);
@@ -163,15 +175,17 @@ void triangle_example::setup_descriptors() {
         vkDestroyDescriptorSetLayout(device, p...);
     }).move_or_throw();
 
-    auto pool_size = VkDescriptorPoolSize{};
-    pool_size.type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    pool_size.descriptorCount = 1;
+    auto pool_size = std::array<VkDescriptorPoolSize, 2>{};
+    pool_size[0].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    pool_size[0].descriptorCount = 1;
+    pool_size[1].type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    pool_size[1].descriptorCount = 1;
 
     // setup descriptor pool
     auto pool_info = VkDescriptorPoolCreateInfo{};
     pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_info.poolSizeCount = 1;
-    pool_info.pPoolSizes    = &pool_size;
+    pool_info.poolSizeCount = pool_size.size();
+    pool_info.pPoolSizes    = pool_size.data();
     pool_info.maxSets       = 1;
 
     auto pool_handle = VkDescriptorPool{nullptr};
@@ -584,7 +598,7 @@ void triangle_example::setup_texture() {
         image_info.extent        = texture_extent;
         image_info.mipLevels     = 1;
         image_info.arrayLayers   = 1;
-        image_info.format        = VK_FORMAT_R8G8B8A8_UNORM;
+        image_info.format        = VK_FORMAT_R32_SFLOAT;
         image_info.tiling        = VK_IMAGE_TILING_LINEAR;
         image_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
         image_info.usage         = VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -702,7 +716,7 @@ void triangle_example::setup_texture() {
         view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         view_info.image    = tex_image.get_handle();
         view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view_info.format   = VK_FORMAT_R8G8B8A8_UNORM;
+        view_info.format   = VK_FORMAT_R32_SFLOAT;
 
         view_info.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
         view_info.subresourceRange.baseMipLevel   = 0;
@@ -726,13 +740,13 @@ void triangle_example::setup_texture() {
         sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         sampler_info.magFilter               = VK_FILTER_LINEAR;
         sampler_info.minFilter               = VK_FILTER_LINEAR;
-        sampler_info.addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-        sampler_info.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-        sampler_info.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        sampler_info.addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_info.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_info.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         sampler_info.anisotropyEnable        = true;
         sampler_info.maxAnisotropy           = 16;
         sampler_info.borderColor             = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-        sampler_info.unnormalizedCoordinates = false;           // TODO: set to true
+        sampler_info.unnormalizedCoordinates = true;
         sampler_info.compareEnable           = false;
         sampler_info.compareOp               = VK_COMPARE_OP_ALWAYS;
         sampler_info.mipmapMode              = VK_SAMPLER_MIPMAP_MODE_NEAREST;
@@ -773,6 +787,72 @@ void triangle_example::setup_texture() {
     texture_memory_  = std::move(tex_memory);
     texture_view_    = std::move(tex_view);
     texture_sampler_ = std::move(tex_sampler);
+}
+
+void triangle_example::setup_uniform_buffer() {
+    auto device = get_device().get_handle();
+    auto status = VK_SUCCESS;
+
+    // create uniform buffer
+    auto buffer_info = VkBufferCreateInfo{};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size        = sizeof(int32_t);
+    buffer_info.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    auto buf_handle = VkBuffer{};
+    status = vkCreateBuffer(device, &buffer_info, nullptr, &buf_handle);
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    auto buffer = vulkan::make_handle(buf_handle, nullptr, [=](auto... p){
+        vkDestroyBuffer(device, p...);
+    }).move_or_throw();
+
+    // allocate buffer memory
+    auto mem_requirements = VkMemoryRequirements{};
+    vkGetBufferMemoryRequirements(device, buf_handle, &mem_requirements);
+
+    auto mem_properties = VkPhysicalDeviceMemoryProperties{};
+    vkGetPhysicalDeviceMemoryProperties(get_device().get_physical_device(), &mem_properties);
+
+    auto flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    auto index = find_memory_type_index(mem_properties, mem_requirements.memoryTypeBits, flags);
+
+    auto alloc_info = VkMemoryAllocateInfo{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize  = mem_requirements.size;
+    alloc_info.memoryTypeIndex = index;
+
+    auto mem_handle = VkDeviceMemory{};
+    status = vkAllocateMemory(device, &alloc_info, nullptr, &mem_handle);
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    auto memory = vulkan::make_handle(mem_handle, nullptr, [=](auto... p){
+        vkFreeMemory(device, p...);
+    }).move_or_throw();
+
+    // bind memory
+    status = vkBindBufferMemory(device, buf_handle, mem_handle, 0);
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    auto desc_info = VkDescriptorBufferInfo{};
+    desc_info.buffer = buf_handle;
+    desc_info.offset = 0;
+    desc_info.range  = sizeof(int32_t);
+
+    auto desc_write = VkWriteDescriptorSet{};
+    desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    desc_write.dstSet          = descriptor_set_;
+    desc_write.dstBinding      = 1;
+    desc_write.dstArrayElement = 0;
+    desc_write.descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    desc_write.descriptorCount = 1;
+    desc_write.pBufferInfo     = &desc_info;
+
+    vkUpdateDescriptorSets(device, 1, &desc_write, 0, nullptr);
+
+    ubo_buffer_        = std::move(buffer);
+    ubo_buffer_memory_ = std::move(memory);
 }
 
 void triangle_example::setup_command_buffers() {
@@ -913,27 +993,41 @@ void triangle_example::cb_display() {
 
     // update texture-image
     if (!paused_) {
-        auto chunk_size = texture_extent.width * 4;
-        auto device = get_device().get_handle();
-        auto mem_handle = texture_memory_.get_handle();
+        auto const device = get_device().get_handle();
 
-        void* data = nullptr;
-        status = vkMapMemory(device, mem_handle, tex_update_offset_, chunk_size, 0, &data);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+        // update texture image
+        {
+            auto const chunk_size   = texture_extent.width;
+            auto const chunk_bytes  = chunk_size * 4;
+            auto const offset_bytes = texture_offset_ * chunk_bytes;
 
-        auto map = vulkan::make_handle(data, nullptr, [=](auto h, auto a){
-            vkUnmapMemory(device, mem_handle);
-        }).move_or_throw();
+            void* data = nullptr;
+            status = vkMapMemory(device, texture_memory_.get_handle(), offset_bytes, chunk_bytes, 0, &data);
+            if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
 
-        auto rnd_gen  = std::mt19937{std::random_device{}()};
-        auto rnd_dist = std::uniform_int_distribution<std::uint8_t>{};
-        std::generate(static_cast<std::uint8_t*>(data), static_cast<std::uint8_t*>(data) + chunk_size, [&](){
-            return rnd_dist(rnd_gen);
-        });
+            auto rnd_gen  = std::mt19937{std::random_device{}()};
+            auto rnd_dist = std::uniform_real_distribution<float>{0.f, 1.f};
+            std::generate(static_cast<float*>(data), static_cast<float*>(data) + chunk_size, [&](){
+                return rnd_dist(rnd_gen);
+            });
 
-        tex_update_offset_ += chunk_size;
-        if (tex_update_offset_ == texture_bytes)
-            tex_update_offset_ = 0;
+            vkUnmapMemory(device, texture_memory_.get_handle());
+        }
+
+        // update uniform buffer
+        {
+            void* data = nullptr;
+            status = vkMapMemory(device, ubo_buffer_memory_.get_handle(), 0, sizeof(std::int32_t), 0, &data);
+            if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+            *static_cast<std::int32_t*>(data) = texture_offset_ + 1;
+
+            vkUnmapMemory(device, ubo_buffer_memory_.get_handle());
+        }
+
+        texture_offset_++;
+        if (texture_offset_ >= texture_extent.height)
+            texture_offset_ -= texture_extent.height;
     }
 
     // render texture to screen
