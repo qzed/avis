@@ -17,7 +17,9 @@ inline auto load_shader_module(VkDevice device, std::string const& file) -> vulk
     return vulkan::create_shader_module(device, fileio::read_file_to_vector(file));
 }
 
-auto create_semaphore(VkDevice device, VkAllocationCallbacks const* alloc) -> vulkan::expected<vulkan::handle<VkSemaphore>> {
+auto create_semaphore(VkDevice device, VkAllocationCallbacks const* alloc)
+        -> vulkan::expected<vulkan::handle<VkSemaphore>>
+{
     VkSemaphoreCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
@@ -30,7 +32,9 @@ auto create_semaphore(VkDevice device, VkAllocationCallbacks const* alloc) -> vu
     });
 }
 
-auto find_memory_type_index(VkPhysicalDeviceMemoryProperties mem, std::uint32_t bits, VkMemoryPropertyFlags properties) -> int {
+auto find_memory_type_index(VkPhysicalDeviceMemoryProperties mem, std::uint32_t bits,
+        VkMemoryPropertyFlags properties) -> int
+{
     for (int i = 0; i < mem.memoryTypeCount; i++)
         if ((bits & (1u << i)) && ((mem.memoryTypes[i].propertyFlags & properties) == properties))
             return i;
