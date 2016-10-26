@@ -623,19 +623,12 @@ void triangle_example::setup_texture() {
         status = vkBindImageMemory(device, tex_image.get_handle(), tex_memory.get_handle(), 0);
         if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
 
-        // load memory
-        void* data;
-        VkDeviceSize size = texture_extent.width * texture_extent.height * 4;
-        status = vkMapMemory(device, tex_memory.get_handle(), 0, size, 0, &data);
+        // clear image
+        void* data = nullptr;
+        status = vkMapMemory(device, mem_handle, 0, texture_bytes, 0, &data);
         if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        auto rnd_gen  = std::mt19937{std::random_device{}()};
-        auto rnd_dist = std::uniform_int_distribution<std::uint8_t>{};
-        std::generate(static_cast<std::uint8_t*>(data), static_cast<std::uint8_t*>(data) + size, [&](){
-            return rnd_dist(rnd_gen);
-        });
-
-        vkUnmapMemory(device, tex_memory.get_handle());
+        std::fill(static_cast<std::uint8_t*>(data), static_cast<std::uint8_t*>(data) + texture_bytes, 0);
+        vkUnmapMemory(device, mem_handle);
     }
 
     // prepare for use: transition image layout
@@ -644,7 +637,7 @@ void triangle_example::setup_texture() {
         auto barrier = VkImageMemoryBarrier{};
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         barrier.oldLayout           = VK_IMAGE_LAYOUT_PREINITIALIZED;
-        barrier.newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.newLayout           = VK_IMAGE_LAYOUT_GENERAL;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image               = tex_image.get_handle();
@@ -656,7 +649,7 @@ void triangle_example::setup_texture() {
         barrier.subresourceRange.layerCount     = 1;
 
         barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_HOST_WRITE_BIT;
 
         // prepare for use: place barrier
         auto alloc_info = VkCommandBufferAllocateInfo{};
@@ -728,15 +721,15 @@ void triangle_example::setup_texture() {
     {
         auto sampler_info = VkSamplerCreateInfo{};
         sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        sampler_info.magFilter               = VK_FILTER_NEAREST;
-        sampler_info.minFilter               = VK_FILTER_NEAREST;
+        sampler_info.magFilter               = VK_FILTER_LINEAR;
+        sampler_info.minFilter               = VK_FILTER_LINEAR;
         sampler_info.addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
         sampler_info.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
         sampler_info.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
         sampler_info.anisotropyEnable        = true;
         sampler_info.maxAnisotropy           = 16;
         sampler_info.borderColor             = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-        sampler_info.unnormalizedCoordinates = false;
+        sampler_info.unnormalizedCoordinates = false;           // TODO: set to true
         sampler_info.compareEnable           = false;
         sampler_info.compareOp               = VK_COMPARE_OP_ALWAYS;
         sampler_info.mipmapMode              = VK_SAMPLER_MIPMAP_MODE_NEAREST;
@@ -801,6 +794,8 @@ void triangle_example::setup_command_buffers() {
         VkResult status = vkBeginCommandBuffer(buffer, &begin_info);
         if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
 
+        // TODO: transform texture-layout to shader-read-only
+
         VkClearValue clear_color = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
 
         VkRenderPassBeginInfo pass_info = {};
@@ -827,6 +822,8 @@ void triangle_example::setup_command_buffers() {
         vkCmdDrawIndexed(buffer, indices.size(), 1, 0, 0, 0);
 
         vkCmdEndRenderPass(buffer);
+
+        // TODO: transform texture-layout to general
 
         status = vkEndCommandBuffer(buffer);
         if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
@@ -860,23 +857,50 @@ void triangle_example::cb_display() {
 
     VkResult status = VK_SUCCESS;
 
+    // synchronize for device-access to texture-image
+    status = vkQueueWaitIdle(get_device().get_graphics_queue());
+    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+    // update texture-image
+    if (!paused_) {
+        auto device = get_device().get_handle();
+        auto mem_handle = texture_memory_.get_handle();
+
+        void* data = nullptr;
+        status = vkMapMemory(device, mem_handle, tex_update_offset_, texture_extent.width, 0, &data);
+        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+
+        auto map = vulkan::make_handle(data, nullptr, [=](auto h, auto a){
+            vkUnmapMemory(device, mem_handle);
+        }).move_or_throw();
+
+        auto rnd_gen  = std::mt19937{std::random_device{}()};
+        auto rnd_dist = std::uniform_int_distribution<std::uint8_t>{};
+        std::generate(static_cast<std::uint8_t*>(data), static_cast<std::uint8_t*>(data) + texture_extent.width, [&](){
+            return rnd_dist(rnd_gen);
+        });
+
+        tex_update_offset_ += texture_extent.width;
+        if (tex_update_offset_ == texture_bytes)
+            tex_update_offset_ = 0;
+    }
+
+    // render texture to screen
+    VkSemaphore sem_img_available = sem_img_available_.get_handle();
+    VkSemaphore sem_img_finished  = sem_img_finished_.get_handle();
+
     std::uint32_t image_index = 0;
     status = vkAcquireNextImageKHR(get_device().get_handle(), get_swapchain().get_swapchain(),
-            std::numeric_limits<std::uint64_t>::max(), sem_img_available_.get_handle(), nullptr, &image_index);
+            std::numeric_limits<std::uint64_t>::max(), sem_img_available, nullptr, &image_index);
 
     if (status == VK_ERROR_OUT_OF_DATE_KHR || status == VK_SUBOPTIMAL_KHR)
         return;
     if (status != VK_SUCCESS)
         throw vulkan::exception(vulkan::to_result(status));
 
-    VkPipelineStageFlags wait_stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-
-    VkSemaphore sem_img_available = sem_img_available_.get_handle();
-    VkSemaphore sem_img_finished  = sem_img_finished_.get_handle();
-
-    VkCommandBuffer command_buffer = command_buffers_[image_index];
-
-    VkSwapchainKHR swapchain = get_swapchain().get_swapchain();
+    VkPipelineStageFlags wait_stages[]  = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+    VkCommandBuffer      command_buffer = command_buffers_[image_index];
+    VkSwapchainKHR       swapchain      = get_swapchain().get_swapchain();
 
     VkSubmitInfo submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -917,6 +941,8 @@ void triangle_example::cb_resize(unsigned int width, unsigned int height) noexce
 void triangle_example::cb_input_key(int key, int scancode, int action, int mods) noexcept {
     if (key == GLFW_KEY_ESCAPE || key == GLFW_KEY_Q)
         window().set_terminate_request(true);
+    else if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
+        paused_ = !paused_;
 }
 
 auto triangle_example::select_physical_device(std::vector<VkPhysicalDevice> const& devices) const -> VkPhysicalDevice {

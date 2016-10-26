@@ -16,23 +16,26 @@ struct vertex {
 };
 
 const auto vertices = std::vector<vertex>{
-    {{-0.75f, -0.75f}, {0.0f, 0.0f}},
-    {{-0.75f,  0.75f}, {0.0f, 1.0f}},
-    {{ 0.75f,  0.75f}, {1.0f, 1.0f}},
-    {{ 0.75f, -0.75f}, {1.0f, 0.0f}},
+    {{-1.0f, -1.0f}, {0.0f, 0.0f}},
+    {{-1.0f,  1.0f}, {0.0f, 1.0f}},
+    {{ 1.0f,  1.0f}, {1.0f, 1.0f}},
+    {{ 1.0f, -1.0f}, {1.0f, 0.0f}},
 };
 
 const auto indices = std::vector<uint16_t>{
     1, 2, 0, 3
 };
 
-constexpr auto texture_extent = VkExtent3D{200, 100, 1};
+constexpr auto texture_extent = VkExtent3D{4096, 1048, 1};
+constexpr auto texture_bytes  = texture_extent.width * texture_extent.height * texture_extent.depth * 4;
 
 
 class triangle_example final : private application_base {
 public:
     triangle_example(application_info const& appinfo)
-            : application_base(appinfo) {}
+            : application_base(appinfo)
+            , paused_{false}
+            , tex_update_offset_{0} {}
 
     using application_base::create;
     using application_base::destroy;
@@ -60,6 +63,9 @@ private:
     void setup_semaphores();
 
 private:
+    bool         paused_;
+    VkDeviceSize tex_update_offset_;
+
     vulkan::handle<VkShaderModule>               vert_shader_module_;
     vulkan::handle<VkShaderModule>               frag_shader_module_;
 
@@ -80,7 +86,6 @@ private:
     vulkan::command_buffers                      command_buffers_;
     vulkan::handle<VkSemaphore>                  sem_img_available_;
     vulkan::handle<VkSemaphore>                  sem_img_finished_;
-
 };
 
 } /* namespace avis */

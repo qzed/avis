@@ -7,5 +7,5 @@ layout(binding = 0) uniform sampler2D tex_sampler;
 
 
 void main() {
-    out_color = vec4(texture(tex_sampler, frag_texcoord).rgb, 1.0);
+    out_color = vec4(texture(tex_sampler, frag_texcoord.ts).rgb, 1.0);
 }
