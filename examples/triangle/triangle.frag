@@ -13,8 +13,14 @@ layout(binding = 1) uniform tex_data_ubo {
 
 void main() {
     vec2 texsize  = textureSize(tex_sampler, 0).st;
-    vec2 texcoord = frag_texcoord.ts * texsize + vec2(0, tex_data.offset);
-    if (texcoord.y > texsize.y) texcoord.y -= texsize.y;
+    vec2 texcoord = frag_texcoord.ts * texsize;
+    texcoord.y = mod(texcoord.y + tex_data.offset, texsize.y);
 
-    out_color = vec4(texture(tex_sampler, texcoord).rrr, 1.0);
+    float val = texture(tex_sampler, texcoord).r;
+
+    vec3 color = vec3(0.0, 0.0, 0.0);
+    color = mix(color, vec3(0.9, 0.9, 0.9), smoothstep(0.00, 0.50, val));   // white
+    color = mix(color, vec3(1.0, 0.0, 0.0), smoothstep(0.50, 1.00, val));   // red
+
+    out_color = vec4(color, 1.0);
 }
