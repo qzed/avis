@@ -2,6 +2,8 @@
 
 #include <avis/vulkan/vulkan.hpp>
 #include <avis/utils/enums.hpp>
+
+#include <system_error>
 #include <string>
 
 
@@ -115,21 +117,22 @@ inline std::string get_message(result from) {
     }
 }
 
-inline result to_result(VkResult from) noexcept {
+
+constexpr result to_result(VkResult from) noexcept {
     return static_cast<result>(from);
 }
 
-inline result to_result(result from) noexcept {
+constexpr result to_result(result from) noexcept {
     return from;
 }
 
 
-inline bool is_error(result r) {
-    return enums::as_underlying_type(r) < 0;
+constexpr bool is_error(result r) {
+    return utils::as_underlying_type(r) < 0;
 }
 
-inline bool is_success(result r) {
-    return enums::as_underlying_type(r) >= 0;
+constexpr bool is_success(result r) {
+    return utils::as_underlying_type(r) >= 0;
 }
 
 } /* namespace vulkan */

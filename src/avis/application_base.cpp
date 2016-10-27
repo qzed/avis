@@ -16,7 +16,7 @@ void application_base::create() try {
     });
 
     window_.set_resize_callback([this](int width, int height) noexcept {
-        this->device_.wait_until_idle();
+        this->device_.wait_idle();
         this->swapchain_.recreate();
         this->cb_resize(width, height);
     });
@@ -42,7 +42,7 @@ void application_base::run() {
         cb_display();
     }
 
-    device_.wait_until_idle();
+    device_.wait_idle();
 }
 
 
@@ -99,7 +99,7 @@ void application_base::setup_vulkan() {
     if (devices.empty())
         throw std::runtime_error("No devices with Vulkan support found.");
 
-    device_ = vulkan::device::create(window_.get_surface(), select_physical_device(devices),
+    device_ = vulkan::make_device(window_.get_surface(), select_physical_device(devices),
             required_vulkan_features(), appinfo_.vulkan_device_extensions, appinfo_.vulkan_validation_layers)
             .move_or_throw();
 

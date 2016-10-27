@@ -37,7 +37,7 @@ set(INC_AVIS_LIB ${INC_AVIS} ${INC_AVIS_UTILS} ${INC_AVIS_VULKAN} ${INC_AVIS_GLF
 # triangle example
 # TODO: move to subdirectory
 set(DIR_EXAMPLES_TRIANGLE "${CMAKE_CURRENT_SOURCE_DIR}/examples/triangle")
-set(SRC_EXAMPLES_TRIANGLE "${DIR_EXAMPLES_TRIANGLE}/main.cpp" "${DIR_EXAMPLES_TRIANGLE}/triangle_example.cpp")
+aux_source_directory(${DIR_EXAMPLES_TRIANGLE} SRC_EXAMPLES_TRIANGLE)
 add_executable(triangle ${SRC_EXAMPLES_TRIANGLE} ${SRC_AVIS_LIB} ${INC_AVIS_LIB})
 target_link_libraries(triangle glfw ${LIB_VULKAN})
 

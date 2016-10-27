@@ -1,30 +1,17 @@
 #pragma once
 
+#include "screenquad.hpp"
+
 #include <avis/application_base.hpp>
+#include <avis/vulkan/render_pass.hpp>
+#include <avis/vulkan/shader_module.hpp>
 #include <avis/vulkan/command_buffers.hpp>
+#include <avis/vulkan/semaphore.hpp>
+
 #include <array>
 
 
 namespace avis {
-
-struct vertex {
-    float pos[2];
-    float texcoord[2];
-
-    static auto get_binding_description()    -> VkVertexInputBindingDescription;
-    static auto get_attribute_descriptions() -> std::array<VkVertexInputAttributeDescription, 2>;
-};
-
-const auto vertices = std::vector<vertex>{
-    {{-1.0f, -1.0f}, {0.0f, 0.0f}},
-    {{-1.0f,  1.0f}, {0.0f, 1.0f}},
-    {{ 1.0f,  1.0f}, {1.0f, 1.0f}},
-    {{ 1.0f, -1.0f}, {1.0f, 0.0f}},
-};
-
-const auto indices = std::vector<uint16_t>{
-    1, 2, 0, 3
-};
 
 constexpr auto texture_extent = VkExtent3D{4096, 1024, 1};
 constexpr auto texture_bytes  = texture_extent.width * texture_extent.height * texture_extent.depth * 4;
@@ -67,10 +54,10 @@ private:
     bool         paused_;
     std::int32_t texture_offset_;
 
-    vulkan::handle<VkShaderModule>               vert_shader_module_;
-    vulkan::handle<VkShaderModule>               frag_shader_module_;
+    vulkan::shader_module                        vert_shader_module_;
+    vulkan::shader_module                        frag_shader_module_;
 
-    vulkan::handle<VkRenderPass>                 renderpass_;
+    vulkan::render_pass                          renderpass_;
     vulkan::handle<VkDescriptorSetLayout>        descriptor_layout_;
     vulkan::handle<VkDescriptorPool>             descriptor_pool_;
     VkDescriptorSet                              descriptor_set_;
@@ -87,8 +74,8 @@ private:
     vulkan::handle<VkBuffer>                     ubo_buffer_;
     vulkan::handle<VkDeviceMemory>               ubo_buffer_memory_;
     vulkan::command_buffers                      command_buffers_;
-    vulkan::handle<VkSemaphore>                  sem_img_available_;
-    vulkan::handle<VkSemaphore>                  sem_img_finished_;
+    vulkan::semaphore                            sem_img_available_;
+    vulkan::semaphore                            sem_img_finished_;
 };
 
 } /* namespace avis */

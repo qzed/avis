@@ -95,8 +95,8 @@ auto swapchain_recreate_base(device const& device, glfw::vulkan_window const& wi
     swapchain_info.imageArrayLayers = 1;
     swapchain_info.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
-    if (device.get_graphics_queue_index() != device.get_present_queue_index()) {
-        std::uint32_t queue_family_indices[] = {device.get_graphics_queue_index(), device.get_present_queue_index()};
+    if (device.get_graphics_queue().index() != device.get_present_queue().index()) {
+        std::uint32_t queue_family_indices[] = {device.get_graphics_queue().index(), device.get_present_queue().index()};
         swapchain_info.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
         swapchain_info.queueFamilyIndexCount = 2;
         swapchain_info.pQueueFamilyIndices   = queue_family_indices;

@@ -11,9 +11,6 @@ namespace vulkan {
 
 class command_buffers {
 public:
-    inline static auto create(VkDevice device, VkCommandBufferAllocateInfo const& alloc_info) noexcept
-            -> expected<command_buffers>;
-
     command_buffers()
             : device_{nullptr}
             , pool_{nullptr}
@@ -57,14 +54,13 @@ private:
 };
 
 
-auto command_buffers::create(VkDevice device, VkCommandBufferAllocateInfo const& alloc_info) noexcept -> expected<command_buffers>
+inline auto make_command_buffers(VkDevice device, VkCommandBufferAllocateInfo const& alloc_info)
+        noexcept -> expected<command_buffers>
 try {
     auto handles = std::vector<VkCommandBuffer>(alloc_info.commandBufferCount, nullptr);
-    VkResult status = vkAllocateCommandBuffers(device, &alloc_info, handles.data());
-    if (status == VK_SUCCESS)
-        return {{device, alloc_info.commandPool, std::move(handles)}};
-    else
-        return to_result(status);
+    AVIS_VULKAN_EXCEPT_RETURN(vkAllocateCommandBuffers(device, &alloc_info, handles.data()));
+
+    return {{device, alloc_info.commandPool, std::move(handles)}};
 } catch (...) {
     return result::error_out_of_host_memory;
 }

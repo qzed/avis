@@ -1,6 +1,5 @@
 #include "triangle_example.hpp"
 
-#include <avis/vulkan/shader.hpp>
 #include <avis/utils/fileio.hpp>
 
 #include <iostream>
@@ -13,25 +12,6 @@
 namespace avis {
 namespace {
 
-inline auto load_shader_module(VkDevice device, std::string const& file) -> vulkan::handle<VkShaderModule> {
-    return vulkan::create_shader_module(device, fileio::read_file_to_vector(file));
-}
-
-auto create_semaphore(VkDevice device, VkAllocationCallbacks const* alloc)
-        -> vulkan::expected<vulkan::handle<VkSemaphore>>
-{
-    VkSemaphoreCreateInfo create_info = {};
-    create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-    VkSemaphore handle = nullptr;
-    VkResult status = vkCreateSemaphore(device, &create_info, nullptr, &handle);
-    if (status != VK_SUCCESS) return vulkan::to_result(status);
-
-    return vulkan::make_handle(handle, nullptr, [=](auto h, auto a){
-        vkDestroySemaphore(device, h, a);
-    });
-}
-
 auto find_memory_type_index(VkPhysicalDeviceMemoryProperties mem, std::uint32_t bits,
         VkMemoryPropertyFlags properties) -> int
 {
@@ -43,31 +23,6 @@ auto find_memory_type_index(VkPhysicalDeviceMemoryProperties mem, std::uint32_t 
 }
 
 } /* namespace */
-
-
-auto vertex::get_binding_description() -> VkVertexInputBindingDescription {
-    VkVertexInputBindingDescription desc = {};
-    desc.binding   = 0;
-    desc.stride    = sizeof(vertex);
-    desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    return desc;
-}
-
-auto vertex::get_attribute_descriptions() -> std::array<VkVertexInputAttributeDescription, 2> {
-    auto desc = std::array<VkVertexInputAttributeDescription, 2>{};
-
-    desc[0].binding  = 0;
-    desc[0].location = 0;
-    desc[0].format   = VK_FORMAT_R32G32_SFLOAT;
-    desc[0].offset   = offsetof(vertex, pos);
-
-    desc[1].binding  = 0;
-    desc[1].location = 1;
-    desc[1].format   = VK_FORMAT_R32G32_SFLOAT;
-    desc[1].offset   = offsetof(vertex, texcoord);
-
-    return desc;
-}
 
 
 void triangle_example::cb_create() {
@@ -86,13 +41,15 @@ void triangle_example::cb_create() {
 }
 
 void triangle_example::setup_shader_modules() {
-    vert_shader_module_ = load_shader_module(get_device().get_handle(), "./resources/triangle.vert.spv");
-    frag_shader_module_ = load_shader_module(get_device().get_handle(), "./resources/triangle.frag.spv");
+    auto const device = get_device().get_handle();
+    auto const vert_shader_src = "./resources/triangle.vert.spv";
+    auto const frag_shader_src = "./resources/triangle.frag.spv";
+
+    vert_shader_module_ = vulkan::make_shader_module(device, utils::read_file_to_vector(vert_shader_src)).move_or_throw();
+    frag_shader_module_ = vulkan::make_shader_module(device, utils::read_file_to_vector(frag_shader_src)).move_or_throw();
 }
 
 void triangle_example::setup_renderpass() {
-    VkDevice device = get_device().get_handle();
-
     VkAttachmentDescription color_attachment = {};
     color_attachment.format         = get_swapchain().get_surface_format().format;
     color_attachment.samples        = VK_SAMPLE_COUNT_1_BIT;
@@ -129,14 +86,7 @@ void triangle_example::setup_renderpass() {
     create_info.dependencyCount = 1;
     create_info.pDependencies   = &dependency;
 
-    VkRenderPass renderpass = nullptr;
-    VkResult status = vkCreateRenderPass(device, &create_info, nullptr, &renderpass);
-    if (status != VK_SUCCESS)
-        throw vulkan::exception(vulkan::to_result(status));
-
-    renderpass_ = vulkan::make_handle(renderpass, nullptr, [=](auto h, auto a){
-        vkDestroyRenderPass(device, h, a);
-    }).move_or_throw();
+    renderpass_ = vulkan::make_render_pass(get_device().get_handle(), create_info).move_or_throw();
 }
 
 void triangle_example::setup_descriptors() {
@@ -252,8 +202,8 @@ void triangle_example::setup_pipeline() {
     VkPipelineShaderStageCreateInfo shader_stages[] = {vert_shader_stage_info, frag_shader_stage_info};
 
     // vertex input
-    auto vertex_binding = vertex::get_binding_description();
-    auto vertex_attribs = vertex::get_attribute_descriptions();
+    auto vertex_binding = vulkan::screenquad::vertex::get_binding_description();
+    auto vertex_attribs = vulkan::screenquad::vertex::get_attribute_descriptions();
 
     VkPipelineVertexInputStateCreateInfo vertex_input_info = {};
     vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -405,7 +355,7 @@ void triangle_example::setup_framebuffers() {
 void triangle_example::setup_command_pool() {
     VkCommandPoolCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    create_info.queueFamilyIndex = get_device().get_graphics_queue_index();
+    create_info.queueFamilyIndex = get_device().get_graphics_queue().index();
 
     VkDevice device = get_device().get_handle();
     VkCommandPool handle = nullptr;
@@ -421,8 +371,8 @@ void triangle_example::setup_vertex_buffer() {
     auto status = VK_SUCCESS;
     auto device = get_device().get_handle();
 
-    VkDeviceSize vertex_buffer_size = sizeof(vertices[0]) * vertices.size();
-    VkDeviceSize index_buffer_size  = sizeof(indices[0]) * indices.size();
+    VkDeviceSize vertex_buffer_size = sizeof(vulkan::screenquad::vertices[0]) * vulkan::screenquad::vertices.size();
+    VkDeviceSize index_buffer_size  = sizeof(vulkan::screenquad::indices[0]) * vulkan::screenquad::indices.size();
 
     // host-accessible staging buffer
     auto staging_buffer = vulkan::handle<VkBuffer>{};
@@ -475,7 +425,7 @@ void triangle_example::setup_vertex_buffer() {
             void* data = nullptr;
             status = vkMapMemory(device, staging_buffer_memory.get_handle(), 0, vertex_buffer_size, 0, &data);
             if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-            std::memcpy(data, vertices.data(), vertex_buffer_size);
+            std::memcpy(data, vulkan::screenquad::vertices.data(), vertex_buffer_size);
             vkUnmapMemory(device, staging_buffer_memory.get_handle());
         }
 
@@ -484,7 +434,7 @@ void triangle_example::setup_vertex_buffer() {
             void* data = nullptr;
             status = vkMapMemory(device, staging_buffer_memory.get_handle(), vertex_buffer_size, index_buffer_size, 0, &data);
             if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-            std::memcpy(data, indices.data(), index_buffer_size);
+            std::memcpy(data, vulkan::screenquad::indices.data(), index_buffer_size);
             vkUnmapMemory(device, staging_buffer_memory.get_handle());
         }
     }
@@ -546,7 +496,7 @@ void triangle_example::setup_vertex_buffer() {
         alloc_info.commandPool        = command_pool_.get_handle();
         alloc_info.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         alloc_info.commandBufferCount = 1;
-        auto cmdbufs = vulkan::command_buffers::create(get_device().get_handle(), alloc_info).move_or_throw();
+        auto cmdbufs = vulkan::make_command_buffers(get_device().get_handle(), alloc_info).move_or_throw();
         auto cmdbuf = cmdbufs[0];
 
         // write copy-command to command-buffer
@@ -573,11 +523,8 @@ void triangle_example::setup_vertex_buffer() {
         submit_info.commandBufferCount = 1;
         submit_info.pCommandBuffers    = &cmdbuf;
 
-        status = vkQueueSubmit(get_device().get_graphics_queue(), 1, &submit_info, nullptr);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        status = vkQueueWaitIdle(get_device().get_graphics_queue());
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+        vulkan::except(get_device().get_graphics_queue().submit(1, &submit_info, nullptr));
+        vulkan::except(get_device().get_graphics_queue().wait_idle());
     }
 
     vertex_buffer_memory_ = std::move(vertex_buffer_memory);
@@ -675,7 +622,7 @@ void triangle_example::setup_texture() {
         alloc_info.commandPool        = command_pool_.get_handle();
         alloc_info.commandBufferCount = 1;
 
-        auto cmdbufs = vulkan::command_buffers::create(device, alloc_info).move_or_throw();
+        auto cmdbufs = vulkan::make_command_buffers(device, alloc_info).move_or_throw();
         auto cmdbuf = cmdbufs[0];
 
         auto begin_info = VkCommandBufferBeginInfo{};
@@ -702,11 +649,8 @@ void triangle_example::setup_texture() {
         submit_info.commandBufferCount = 1;
         submit_info.pCommandBuffers    = &cmdbuf;
 
-        status = vkQueueSubmit(get_device().get_graphics_queue(), 1, &submit_info, nullptr);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        status = vkQueueWaitIdle(get_device().get_graphics_queue());
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+        vulkan::except(get_device().get_graphics_queue().submit(1, &submit_info, nullptr));
+        vulkan::except(get_device().get_graphics_queue().wait_idle());
     }
 
     // create image view
@@ -863,7 +807,7 @@ void triangle_example::setup_command_buffers() {
     alloc_info.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc_info.commandBufferCount = static_cast<uint32_t>(framebuffers_.size());
 
-    auto command_buffers = vulkan::command_buffers::create(get_device().get_handle(), alloc_info).move_or_throw();
+    auto command_buffers = vulkan::make_command_buffers(get_device().get_handle(), alloc_info).move_or_throw();
 
     // fill command buffers
     for (std::size_t i = 0; i < command_buffers.size(); i++) {
@@ -923,10 +867,10 @@ void triangle_example::setup_command_buffers() {
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(buffer, 0, 1, vertex_buffers, offsets);
 
-        VkDeviceSize index_offset = sizeof(vertices[0]) * vertices.size();
+        VkDeviceSize index_offset = sizeof(vulkan::screenquad::vertices[0]) * vulkan::screenquad::vertices.size();
         vkCmdBindIndexBuffer(buffer, vertex_buffer_.get_handle(), index_offset, VK_INDEX_TYPE_UINT16);
 
-        vkCmdDrawIndexed(buffer, indices.size(), 1, 0, 0, 0);
+        vkCmdDrawIndexed(buffer, vulkan::screenquad::indices.size(), 1, 0, 0, 0);
 
         vkCmdEndRenderPass(buffer);
 
@@ -963,11 +907,12 @@ void triangle_example::setup_command_buffers() {
 }
 
 void triangle_example::setup_semaphores() {
-    sem_img_available_ = create_semaphore(get_device().get_handle(), nullptr).move_or_throw();
-    sem_img_finished_  = create_semaphore(get_device().get_handle(), nullptr).move_or_throw();
+    sem_img_available_ = vulkan::make_semaphore(get_device().get_handle()).move_or_throw();
+    sem_img_finished_  = vulkan::make_semaphore(get_device().get_handle()).move_or_throw();
 }
 
 void triangle_example::cb_destroy() {
+    // TODO
     sem_img_available_.destroy();
     sem_img_finished_.destroy();
     command_buffers_.destroy();
@@ -988,8 +933,7 @@ void triangle_example::cb_display() {
     VkResult status = VK_SUCCESS;
 
     // synchronize for device-access to texture-image
-    status = vkQueueWaitIdle(get_device().get_graphics_queue());
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+    vulkan::except(get_device().get_graphics_queue().wait_idle());
 
     // update texture-image
     if (!paused_) {
@@ -1002,8 +946,7 @@ void triangle_example::cb_display() {
             auto const offset_bytes = texture_offset_ * chunk_bytes;
 
             void* data = nullptr;
-            status = vkMapMemory(device, texture_memory_.get_handle(), offset_bytes, chunk_bytes, 0, &data);
-            if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+            vulkan::except(vkMapMemory(device, texture_memory_.get_handle(), offset_bytes, chunk_bytes, 0, &data));
 
             auto rnd_gen  = std::mt19937{std::random_device{}()};
             auto rnd_dist = std::uniform_real_distribution<float>{0.f, 1.f};
@@ -1041,7 +984,7 @@ void triangle_example::cb_display() {
     if (status == VK_ERROR_OUT_OF_DATE_KHR || status == VK_SUBOPTIMAL_KHR)
         return;
     if (status != VK_SUCCESS)
-        throw vulkan::exception(vulkan::to_result(status));
+        throw vulkan::exception(status);
 
     VkPipelineStageFlags wait_stages[]  = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
     VkCommandBuffer      command_buffer = command_buffers_[image_index];
@@ -1057,8 +1000,7 @@ void triangle_example::cb_display() {
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores    = &sem_img_finished;
 
-    status = vkQueueSubmit(get_device().get_graphics_queue(), 1, &submit_info, nullptr);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+    vulkan::except(get_device().get_graphics_queue().submit(1, &submit_info, nullptr));
 
     VkPresentInfoKHR present_info = {};
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1069,8 +1011,7 @@ void triangle_example::cb_display() {
     present_info.pImageIndices      = &image_index;
     present_info.pResults           = nullptr;
 
-    status = vkQueuePresentKHR(get_device().get_present_queue(), &present_info);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+    vulkan::except(get_device().get_present_queue().present_khr(present_info));
 
     auto delta_frame = clock::now() - start_frame;
     std::cout << "frame-time: " << std::chrono::duration_cast<std::chrono::microseconds>(delta_frame).count() << u8"µs\n";

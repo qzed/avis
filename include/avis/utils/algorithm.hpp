@@ -3,6 +3,7 @@
 #include <utility>
 
 
+namespace avis {
 namespace utils {
 
 template <class T>
@@ -11,3 +12,4 @@ constexpr T const& clamp(T const& val, T const& min, T const& max) {
 }
 
 } /* namespace utils */
+} /* namespace avis */

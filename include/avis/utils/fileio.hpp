@@ -5,7 +5,7 @@
 
 
 namespace avis {
-namespace fileio {
+namespace utils {
 
 std::vector<char> read_file_to_vector(const std::string& filename) {
     auto file = std::ifstream();
@@ -22,5 +22,5 @@ std::vector<char> read_file_to_vector(const std::string& filename) {
     return buffer;
 }
 
-} /* namespace fileio */
+} /* namespace utils */
 } /* namespace avis */

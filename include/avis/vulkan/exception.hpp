@@ -4,14 +4,6 @@
 #include <system_error>
 
 
-#define AVIS_VKEXCEPT(result)                       \
-{                                                   \
-    using ::avis::vulkan::to_result;                \
-    ::avis::vulkan::result r = to_result((result))  \
-    if (!r) throw ::avis::vulkan::exception(r);     \
-}
-
-
 namespace avis {
 namespace vulkan {
 namespace detail {
@@ -43,13 +35,6 @@ inline std::error_condition make_error_condition(result from) noexcept {
   return std::error_condition(static_cast<int>(from), vulkan_category());
 }
 
-
-class exception : public std::system_error {
-public:
-    using std::system_error::system_error;
-};
-
-
 } /* namespace vulkan */
 } /* namespace avis */
 
@@ -60,3 +45,35 @@ template <>
 struct is_error_code_enum<::avis::vulkan::result> : public true_type {};
 
 } /* namespace std */
+
+
+namespace avis {
+namespace vulkan {
+
+class exception : public std::system_error {
+public:
+    exception(result status) : std::system_error(status) {}
+
+    template <class S>
+    exception(S status) : std::system_error(to_result(status)) {}
+
+    exception(result status, std::string const& what) : std::system_error(status, what) {}
+
+    template <class S>
+    exception(S status, std::string const& what) : std::system_error(to_result(status), what) {}
+};
+
+
+template <class S>
+constexpr void except(S status) {
+    if (to_result(status) != result::success) throw exception(to_result(status));
+}
+
+#define AVIS_VULKAN_EXCEPT_RETURN(expr) {               \
+    ::avis::vulkan::result status = to_result((expr));  \
+    if (status != result::success) return status;       \
+}
+
+
+} /* namespace vulkan */
+} /* namespace avis */

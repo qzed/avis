@@ -12,8 +12,8 @@ void vulkan_window::create(vulkan::instance& instance, VkAllocationCallbacks con
     instance_ = &instance;
     alloc_    = alloc;
 
-    vulkan::result status = vulkan::to_result(glfwCreateWindowSurface(instance.get_handle(), get_handle(), alloc, &surface_));
-    if (status != vulkan::result::success) {
+    VkResult status = glfwCreateWindowSurface(instance.get_handle(), get_handle(), alloc, &surface_);
+    if (status != VK_SUCCESS) {
         destroy();
         throw vulkan::exception(status);
     }
