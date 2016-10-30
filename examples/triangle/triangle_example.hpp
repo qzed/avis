@@ -1,12 +1,12 @@
 #pragma once
 
-#include "screenquad.hpp"
-
 #include <avis/application_base.hpp>
-#include <avis/vulkan/render_pass.hpp>
-#include <avis/vulkan/shader_module.hpp>
+#include <avis/vulkan/buffer.hpp>
+#include <avis/vulkan/image.hpp>
 #include <avis/vulkan/command_buffers.hpp>
-#include <avis/vulkan/semaphore.hpp>
+#include <avis/vulkan/screenquad.hpp>
+#include <avis/vulkan/handles.hpp>
+
 
 #include <array>
 
@@ -44,7 +44,7 @@ private:
     void setup_pipeline();
     void setup_framebuffers();
     void setup_command_pool();
-    void setup_vertex_buffer();
+    void setup_screenquad();
     void setup_texture();
     void setup_uniform_buffer();
     void setup_command_buffers();
@@ -54,28 +54,27 @@ private:
     bool         paused_;
     std::int32_t texture_offset_;
 
-    vulkan::shader_module                        vert_shader_module_;
-    vulkan::shader_module                        frag_shader_module_;
+    vulkan::shader_module            vert_shader_module_;
+    vulkan::shader_module            frag_shader_module_;
 
-    vulkan::render_pass                          renderpass_;
-    vulkan::handle<VkDescriptorSetLayout>        descriptor_layout_;
-    vulkan::handle<VkDescriptorPool>             descriptor_pool_;
-    VkDescriptorSet                              descriptor_set_;
-    vulkan::handle<VkPipelineLayout>             pipeline_layout_;
-    vulkan::handle<VkPipeline>                   pipeline_;
-    std::vector<vulkan::handle<VkFramebuffer>>   framebuffers_;
-    vulkan::handle<VkCommandPool>                command_pool_;
-    vulkan::handle<VkDeviceMemory>               vertex_buffer_memory_;
-    vulkan::handle<VkBuffer>                     vertex_buffer_;
-    vulkan::handle<VkDeviceMemory>               texture_memory_;
-    vulkan::handle<VkImage>                      texture_image_;
-    vulkan::handle<VkImageView>                  texture_view_;
-    vulkan::handle<VkSampler>                    texture_sampler_;
-    vulkan::handle<VkBuffer>                     ubo_buffer_;
-    vulkan::handle<VkDeviceMemory>               ubo_buffer_memory_;
-    vulkan::command_buffers                      command_buffers_;
-    vulkan::semaphore                            sem_img_available_;
-    vulkan::semaphore                            sem_img_finished_;
+    vulkan::render_pass              renderpass_;
+    vulkan::descriptor_set_layout    descriptor_layout_;
+    vulkan::descriptor_pool          descriptor_pool_;
+    VkDescriptorSet                  descriptor_set_;
+    vulkan::pipeline_layout          pipeline_layout_;
+    vulkan::pipeline                 pipeline_;
+    std::vector<vulkan::framebuffer> framebuffers_;
+    vulkan::screenquad               screenquad_;
+
+    vulkan::image                    texture_image_;
+    vulkan::handle<VkImageView>      texture_view_;
+    vulkan::handle<VkSampler>        texture_sampler_;
+
+    vulkan::buffer                   uniform_buffer_;
+    vulkan::command_pool             command_pool_;
+    vulkan::command_buffers          command_buffers_;
+    vulkan::semaphore                sem_img_available_;
+    vulkan::semaphore                sem_img_finished_;
 };
 
 } /* namespace avis */

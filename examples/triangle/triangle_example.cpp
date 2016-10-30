@@ -3,27 +3,12 @@
 #include <avis/utils/fileio.hpp>
 
 #include <iostream>
-#include <cstring>
 #include <algorithm>
 #include <random>
 #include <chrono>
 
 
 namespace avis {
-namespace {
-
-auto find_memory_type_index(VkPhysicalDeviceMemoryProperties mem, std::uint32_t bits,
-        VkMemoryPropertyFlags properties) -> int
-{
-    for (int i = 0; i < mem.memoryTypeCount; i++)
-        if ((bits & (1u << i)) && ((mem.memoryTypes[i].propertyFlags & properties) == properties))
-            return i;
-
-    return -1;
-}
-
-} /* namespace */
-
 
 void triangle_example::cb_create() {
     setup_shader_modules();
@@ -33,7 +18,7 @@ void triangle_example::cb_create() {
     setup_pipeline();
     setup_framebuffers();
     setup_command_pool();
-    setup_vertex_buffer();
+    setup_screenquad();
     setup_texture();
     setup_uniform_buffer();
     setup_command_buffers();
@@ -50,7 +35,7 @@ void triangle_example::setup_shader_modules() {
 }
 
 void triangle_example::setup_renderpass() {
-    VkAttachmentDescription color_attachment = {};
+    auto color_attachment = VkAttachmentDescription{};
     color_attachment.format         = get_swapchain().get_surface_format().format;
     color_attachment.samples        = VK_SAMPLE_COUNT_1_BIT;
     color_attachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -60,16 +45,16 @@ void triangle_example::setup_renderpass() {
     color_attachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
     color_attachment.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-    VkAttachmentReference color_attachment_ref = {};
+    auto color_attachment_ref = VkAttachmentReference{};
     color_attachment_ref.attachment = 0;
     color_attachment_ref.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    VkSubpassDescription subpass = {};
+    auto subpass = VkSubpassDescription{};
     subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments    = &color_attachment_ref;
 
-    VkSubpassDependency dependency = {};
+    auto dependency = VkSubpassDependency{};
     dependency.srcSubpass    = VK_SUBPASS_EXTERNAL;
     dependency.dstSubpass    = 0;
     dependency.srcStageMask  = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
@@ -77,7 +62,7 @@ void triangle_example::setup_renderpass() {
     dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
-    VkRenderPassCreateInfo create_info = {};
+    auto create_info = VkRenderPassCreateInfo{};
     create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     create_info.attachmentCount = 1;
     create_info.pAttachments    = &color_attachment;
@@ -90,9 +75,6 @@ void triangle_example::setup_renderpass() {
 }
 
 void triangle_example::setup_descriptors() {
-    auto device = get_device().get_handle();
-    auto status = VK_SUCCESS;
-
     // setup descriptor layout: texture
     auto sampler_binding = VkDescriptorSetLayoutBinding{};
     sampler_binding.binding            = 0;
@@ -117,13 +99,7 @@ void triangle_example::setup_descriptors() {
     layout_info.bindingCount = bindings.size();
     layout_info.pBindings    = bindings.data();
 
-    auto layout_handle = VkDescriptorSetLayout{nullptr};
-    status = vkCreateDescriptorSetLayout(device, &layout_info, nullptr, &layout_handle);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-    auto layout = vulkan::make_handle(layout_handle, nullptr, [=](auto... p){
-        vkDestroyDescriptorSetLayout(device, p...);
-    }).move_or_throw();
+    auto layout = vulkan::make_descriptor_set_layout(get_device().get_handle(), layout_info).move_or_throw();
 
     auto pool_size = std::array<VkDescriptorPoolSize, 2>{};
     pool_size[0].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -138,74 +114,61 @@ void triangle_example::setup_descriptors() {
     pool_info.pPoolSizes    = pool_size.data();
     pool_info.maxSets       = 1;
 
-    auto pool_handle = VkDescriptorPool{nullptr};
-    status = vkCreateDescriptorPool(device, &pool_info, nullptr, &pool_handle);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-    auto pool = vulkan::make_handle(pool_handle, nullptr, [=](auto... p){
-        vkDestroyDescriptorPool(device, p...);
-    }).move_or_throw();
+    auto pool = vulkan::make_descriptor_pool(get_device().get_handle(), pool_info).move_or_throw();
 
     // setup descriptor set
+    auto layouts = std::array<VkDescriptorSetLayout, 1>{{ layout.get_handle() }};
+
     auto alloc_info = VkDescriptorSetAllocateInfo{};
     alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    alloc_info.descriptorPool     = pool_handle;
-    alloc_info.descriptorSetCount = 1;
-    alloc_info.pSetLayouts        = &layout_handle;
+    alloc_info.descriptorPool     = pool.get_handle();
+    alloc_info.descriptorSetCount = layouts.size();
+    alloc_info.pSetLayouts        = layouts.data();
 
-    auto set_handle = VkDescriptorSet{nullptr};
-    status = vkAllocateDescriptorSets(device, &alloc_info, &set_handle);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+    auto set = VkDescriptorSet{nullptr};
+    vulkan::except(vkAllocateDescriptorSets(get_device().get_handle(), &alloc_info, &set));
 
     descriptor_layout_ = std::move(layout);
     descriptor_pool_   = std::move(pool);
-    descriptor_set_    = set_handle;
+    descriptor_set_    = set;
 }
 
 void triangle_example::setup_pipeline_layout() {
-    VkDevice device = get_device().get_handle();
+    auto layouts = std::array<VkDescriptorSetLayout, 1>{{ descriptor_layout_.get_handle() }};
 
-    VkDescriptorSetLayout layouts[] = { descriptor_layout_.get_handle() };
-
-    VkPipelineLayoutCreateInfo create_info = {};
+    auto create_info = VkPipelineLayoutCreateInfo{};
     create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    create_info.setLayoutCount         = 1;
-    create_info.pSetLayouts            = layouts;
+    create_info.setLayoutCount         = layouts.size();
+    create_info.pSetLayouts            = layouts.data();
     create_info.pushConstantRangeCount = 0;
     create_info.pPushConstantRanges    = nullptr;
 
-    VkPipelineLayout handle = nullptr;
-    VkResult status = vkCreatePipelineLayout(device, &create_info, nullptr, &handle);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-    pipeline_layout_ = vulkan::make_handle(handle, nullptr, [=](auto h, auto a){
-        vkDestroyPipelineLayout(device, h, a);
-    }).move_or_throw();
+    pipeline_layout_ = vulkan::make_pipeline_layout(get_device().get_handle(), create_info).move_or_throw();
 }
 
 void triangle_example::setup_pipeline() {
-    VkDevice device = get_device().get_handle();
-
     // shader
-    VkPipelineShaderStageCreateInfo vert_shader_stage_info = {};
+    auto vert_shader_stage_info = VkPipelineShaderStageCreateInfo{};
     vert_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vert_shader_stage_info.stage  = VK_SHADER_STAGE_VERTEX_BIT;
     vert_shader_stage_info.module = vert_shader_module_.get_handle();
     vert_shader_stage_info.pName  = "main";
 
-    VkPipelineShaderStageCreateInfo frag_shader_stage_info = {};
+    auto frag_shader_stage_info = VkPipelineShaderStageCreateInfo{};
     frag_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     frag_shader_stage_info.stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
     frag_shader_stage_info.module = frag_shader_module_.get_handle();
     frag_shader_stage_info.pName  = "main";
 
-    VkPipelineShaderStageCreateInfo shader_stages[] = {vert_shader_stage_info, frag_shader_stage_info};
+    auto shader_stages = std::array<VkPipelineShaderStageCreateInfo, 2>{{
+        vert_shader_stage_info, frag_shader_stage_info
+    }};
 
     // vertex input
     auto vertex_binding = vulkan::screenquad::vertex::get_binding_description();
     auto vertex_attribs = vulkan::screenquad::vertex::get_attribute_descriptions();
 
-    VkPipelineVertexInputStateCreateInfo vertex_input_info = {};
+    auto vertex_input_info = VkPipelineVertexInputStateCreateInfo{};
     vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertex_input_info.vertexBindingDescriptionCount   = 1;
     vertex_input_info.pVertexBindingDescriptions      = &vertex_binding;
@@ -213,13 +176,13 @@ void triangle_example::setup_pipeline() {
     vertex_input_info.pVertexAttributeDescriptions    = vertex_attribs.data();
 
     // input assembly
-    VkPipelineInputAssemblyStateCreateInfo input_assembly_info = {};
+    auto input_assembly_info = VkPipelineInputAssemblyStateCreateInfo{};
     input_assembly_info.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     input_assembly_info.topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
     input_assembly_info.primitiveRestartEnable = true;
 
     // viewport and scissor
-    VkViewport viewport = {};
+    auto viewport = VkViewport{};
     viewport.x        = 0.0f;
     viewport.y        = 0.0f;
     viewport.width    = static_cast<float>(get_swapchain().get_extent().width);
@@ -227,11 +190,11 @@ void triangle_example::setup_pipeline() {
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 0.0f;
 
-    VkRect2D scissor = {};
+    auto scissor = VkRect2D{};
     scissor.offset = {0, 0};
     scissor.extent = get_swapchain().get_extent();
 
-    VkPipelineViewportStateCreateInfo viewport_state = {};
+    auto viewport_state = VkPipelineViewportStateCreateInfo{};
     viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     viewport_state.viewportCount = 1;
     viewport_state.pViewports    = &viewport;
@@ -239,7 +202,7 @@ void triangle_example::setup_pipeline() {
     viewport_state.pScissors     = &scissor;
 
     // rasterizer
-    VkPipelineRasterizationStateCreateInfo rasterizer = {};
+    auto rasterizer = VkPipelineRasterizationStateCreateInfo{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable        = false;
     rasterizer.rasterizerDiscardEnable = false;
@@ -250,7 +213,7 @@ void triangle_example::setup_pipeline() {
     rasterizer.depthBiasEnable         = false;
 
     // multisampling
-    VkPipelineMultisampleStateCreateInfo multisampling = {};
+    auto multisampling = VkPipelineMultisampleStateCreateInfo{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.sampleShadingEnable   = true;
     multisampling.rasterizationSamples  = VK_SAMPLE_COUNT_1_BIT;
@@ -260,7 +223,7 @@ void triangle_example::setup_pipeline() {
     multisampling.alphaToOneEnable      = false;
 
     // blending
-    VkPipelineColorBlendAttachmentState color_blend_attachment = {};
+    auto color_blend_attachment = VkPipelineColorBlendAttachmentState{};
     color_blend_attachment.colorWriteMask
             = VK_COLOR_COMPONENT_R_BIT
             | VK_COLOR_COMPONENT_G_BIT
@@ -274,7 +237,7 @@ void triangle_example::setup_pipeline() {
     color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
     color_blend_attachment.alphaBlendOp        = VK_BLEND_OP_ADD;
 
-    VkPipelineColorBlendStateCreateInfo color_blending = {};
+    auto color_blending = VkPipelineColorBlendStateCreateInfo{};
     color_blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     color_blending.logicOpEnable     = false;
     color_blending.logicOp           = VK_LOGIC_OP_COPY;
@@ -285,17 +248,11 @@ void triangle_example::setup_pipeline() {
     color_blending.blendConstants[2] = 0.0f;
     color_blending.blendConstants[3] = 0.0f;
 
-    // vk::DynamicState dynamic_states[] = {vk::DynamicState::eViewport, vk::DynamicState::eLineWidth};
-    // vk::PipelineDynamicStateCreateInfo dynamic_state{};
-    // dynamic_state.sType = ...
-    // dynamic_state.dynamicStateCount = 2;
-    // dynamic_state.pDynamicStates = dynamic_states;
-
     // create pipeline
-    VkGraphicsPipelineCreateInfo create_info = {};
+    auto create_info = VkGraphicsPipelineCreateInfo{};
     create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    create_info.stageCount = 2;
-    create_info.pStages    = shader_stages;
+    create_info.stageCount = shader_stages.size();
+    create_info.pStages    = shader_stages.data();
 
     create_info.pVertexInputState   = &vertex_input_info;
     create_info.pInputAssemblyState = &input_assembly_info;
@@ -313,18 +270,11 @@ void triangle_example::setup_pipeline() {
     create_info.basePipelineHandle = nullptr;
     create_info.basePipelineIndex  = -1;
 
-    VkPipeline handle = nullptr;
-    VkResult status = vkCreateGraphicsPipelines(device, nullptr, 1, &create_info, nullptr, &handle);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-    pipeline_ = vulkan::make_handle(handle, nullptr, [=](auto h, auto a){
-        vkDestroyPipeline(device, h, a);
-    }).move_or_throw();
+    pipeline_ = vulkan::make_pipeline(get_device().get_handle(), nullptr, create_info).move_or_throw();
 }
 
 void triangle_example::setup_framebuffers() {
-    VkDevice const device = get_device().get_handle();
-
+    auto const  device      = get_device().get_handle();
     auto const& image_views = get_swapchain().get_image_views();
 
     framebuffers_.clear();
@@ -333,7 +283,7 @@ void triangle_example::setup_framebuffers() {
     for (std::size_t i = 0; i < image_views.size(); i++) {
         auto image_view = image_views[i].get_handle();
 
-        VkFramebufferCreateInfo create_info = {};
+        auto create_info = VkFramebufferCreateInfo{};
         create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         create_info.renderPass      = renderpass_.get_handle();
         create_info.attachmentCount = 1;
@@ -342,258 +292,50 @@ void triangle_example::setup_framebuffers() {
         create_info.height          = get_swapchain().get_extent().height;
         create_info.layers          = 1;
 
-        VkFramebuffer handle = nullptr;
-        VkResult status = vkCreateFramebuffer(device, &create_info, nullptr, &handle);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        framebuffers_.push_back(vulkan::make_handle(handle, nullptr, [=](auto h, auto a) {
-            vkDestroyFramebuffer(device, h, a);
-        }).move_or_throw());
+        framebuffers_.push_back(vulkan::make_framebuffer(device, create_info).move_or_throw());
     }
 }
 
 void triangle_example::setup_command_pool() {
-    VkCommandPoolCreateInfo create_info = {};
+    auto create_info = VkCommandPoolCreateInfo{};
     create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     create_info.queueFamilyIndex = get_device().get_graphics_queue().index();
 
-    VkDevice device = get_device().get_handle();
-    VkCommandPool handle = nullptr;
-    VkResult status = vkCreateCommandPool(device, &create_info, nullptr, &handle);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-    command_pool_ = vulkan::make_handle(handle, nullptr, [=](auto h, auto a){
-        vkDestroyCommandPool(device, h, a);
-    }).move_or_throw();
+    command_pool_ = vulkan::make_command_pool(get_device().get_handle(), create_info).move_or_throw();
 }
 
-void triangle_example::setup_vertex_buffer() {
-    auto status = VK_SUCCESS;
-    auto device = get_device().get_handle();
-
-    VkDeviceSize vertex_buffer_size = sizeof(vulkan::screenquad::vertices[0]) * vulkan::screenquad::vertices.size();
-    VkDeviceSize index_buffer_size  = sizeof(vulkan::screenquad::indices[0]) * vulkan::screenquad::indices.size();
-
-    // host-accessible staging buffer
-    auto staging_buffer = vulkan::handle<VkBuffer>{};
-    auto staging_buffer_memory = vulkan::handle<VkDeviceMemory>{};
-    {
-        // create vertex buffer
-        auto buffer_info = VkBufferCreateInfo{};
-        buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        buffer_info.size        = vertex_buffer_size + index_buffer_size;
-        buffer_info.usage       = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        auto handle = VkBuffer{nullptr};
-        status = vkCreateBuffer(device, &buffer_info, nullptr, &handle);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        staging_buffer = vulkan::make_handle(handle, nullptr, [=](auto h, auto a){
-            vkDestroyBuffer(device, h, a);
-        }).move_or_throw();
-
-        // allocate buffer memory
-        auto mem_requirements = VkMemoryRequirements{};
-        vkGetBufferMemoryRequirements(device, staging_buffer.get_handle(), &mem_requirements);
-
-        auto mem_properties = VkPhysicalDeviceMemoryProperties{};
-        vkGetPhysicalDeviceMemoryProperties(get_device().get_physical_device(), &mem_properties);
-
-        auto flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-        auto index = find_memory_type_index(mem_properties, mem_requirements.memoryTypeBits, flags);
-        if (index < 0) throw std::runtime_error("could not find suitable memory type");
-
-        auto alloc_info = VkMemoryAllocateInfo{};
-        alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        alloc_info.allocationSize  = mem_requirements.size;
-        alloc_info.memoryTypeIndex = index;
-
-        auto mem_handle = VkDeviceMemory{nullptr};
-        status = vkAllocateMemory(device, &alloc_info, nullptr, &mem_handle);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        staging_buffer_memory = vulkan::make_handle(mem_handle, nullptr, [=](auto h, auto a){
-            vkFreeMemory(device, h, a);
-        }).move_or_throw();
-
-        // bind memory
-        vkBindBufferMemory(device, staging_buffer.get_handle(), staging_buffer_memory.get_handle(), 0);
-
-        // map and fill vertex buffer
-        {
-            void* data = nullptr;
-            status = vkMapMemory(device, staging_buffer_memory.get_handle(), 0, vertex_buffer_size, 0, &data);
-            if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-            std::memcpy(data, vulkan::screenquad::vertices.data(), vertex_buffer_size);
-            vkUnmapMemory(device, staging_buffer_memory.get_handle());
-        }
-
-        // map and fill index buffer
-        {
-            void* data = nullptr;
-            status = vkMapMemory(device, staging_buffer_memory.get_handle(), vertex_buffer_size, index_buffer_size, 0, &data);
-            if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-            std::memcpy(data, vulkan::screenquad::indices.data(), index_buffer_size);
-            vkUnmapMemory(device, staging_buffer_memory.get_handle());
-        }
-    }
-
-    // device-local vertex buffer
-    auto vertex_buffer        = vulkan::handle<VkBuffer>{};
-    auto vertex_buffer_memory = vulkan::handle<VkDeviceMemory>{};
-    {
-        // create vertex buffer
-        auto buffer_info = VkBufferCreateInfo{};
-        buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        buffer_info.size        = vertex_buffer_size + index_buffer_size;
-        buffer_info.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-                                  | VK_BUFFER_USAGE_INDEX_BUFFER_BIT
-                                  | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-        buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        auto handle = VkBuffer{nullptr};
-        status = vkCreateBuffer(device, &buffer_info, nullptr, &handle);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        vertex_buffer = vulkan::make_handle(handle, nullptr, [=](auto h, auto a){
-            vkDestroyBuffer(device, h, a);
-        }).move_or_throw();
-
-        // allocate buffer memory
-        auto mem_requirements = VkMemoryRequirements{};
-        vkGetBufferMemoryRequirements(device, vertex_buffer.get_handle(), &mem_requirements);
-
-        auto mem_properties = VkPhysicalDeviceMemoryProperties{};
-        vkGetPhysicalDeviceMemoryProperties(get_device().get_physical_device(), &mem_properties);
-
-        auto flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-        auto index = find_memory_type_index(mem_properties, mem_requirements.memoryTypeBits, flags);
-        if (index < 0) throw std::runtime_error("could not find suitable memory type");
-
-        auto alloc_info = VkMemoryAllocateInfo{};
-        alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        alloc_info.allocationSize  = mem_requirements.size;
-        alloc_info.memoryTypeIndex = index;
-
-        auto mem_handle = VkDeviceMemory{nullptr};
-        status = vkAllocateMemory(device, &alloc_info, nullptr, &mem_handle);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        vertex_buffer_memory = vulkan::make_handle(mem_handle, nullptr, [=](auto h, auto a){
-            vkFreeMemory(device, h, a);
-        }).move_or_throw();
-
-        // bind memory
-        vkBindBufferMemory(device, vertex_buffer.get_handle(), vertex_buffer_memory.get_handle(), 0);
-    }
-
-    // transfer from staging to device-local buffer
-    {
-        // create command buffer
-        auto alloc_info = VkCommandBufferAllocateInfo{};
-        alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        alloc_info.commandPool        = command_pool_.get_handle();
-        alloc_info.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        alloc_info.commandBufferCount = 1;
-        auto cmdbufs = vulkan::make_command_buffers(get_device().get_handle(), alloc_info).move_or_throw();
-        auto cmdbuf = cmdbufs[0];
-
-        // write copy-command to command-buffer
-        auto begin_info = VkCommandBufferBeginInfo{};
-        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-        status = vkBeginCommandBuffer(cmdbuf, &begin_info);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        auto bufcpy = VkBufferCopy{};
-        bufcpy.srcOffset = 0;
-        bufcpy.dstOffset = 0;
-        bufcpy.size      = vertex_buffer_size + index_buffer_size;
-
-        vkCmdCopyBuffer(cmdbuf, staging_buffer.get_handle(), vertex_buffer.get_handle(), 1, &bufcpy);
-
-        status = vkEndCommandBuffer(cmdbuf);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        // submit command buffer
-        auto submit_info = VkSubmitInfo{};
-        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit_info.commandBufferCount = 1;
-        submit_info.pCommandBuffers    = &cmdbuf;
-
-        vulkan::except(get_device().get_graphics_queue().submit(1, &submit_info, nullptr));
-        vulkan::except(get_device().get_graphics_queue().wait_idle());
-    }
-
-    vertex_buffer_memory_ = std::move(vertex_buffer_memory);
-    vertex_buffer_        = std::move(vertex_buffer);
+void triangle_example::setup_screenquad() {
+    screenquad_ = vulkan::make_screenquad(get_device().get_handle(), get_device().get_physical_device(),
+            command_pool_.get_handle(), get_device().get_graphics_queue().handle()).move_or_throw();
 }
 
 void triangle_example::setup_texture() {
-    auto status = VK_SUCCESS;
     auto const device = get_device().get_handle();
 
-    auto tex_image  = vulkan::handle<VkImage>{};
-    auto tex_memory = vulkan::handle<VkDeviceMemory>{};
+    // create texture image
+    auto image_info = VkImageCreateInfo{};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType     = VK_IMAGE_TYPE_2D;
+    image_info.extent        = texture_extent;
+    image_info.mipLevels     = 1;
+    image_info.arrayLayers   = 1;
+    image_info.format        = VK_FORMAT_R32_SFLOAT;
+    image_info.tiling        = VK_IMAGE_TILING_LINEAR;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    image_info.usage         = VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+    image_info.samples       = VK_SAMPLE_COUNT_1_BIT;
+    image_info.flags         = 0;
+
+    auto memory_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    auto tex_image = vulkan::make_image(device, get_device().get_physical_device(), image_info, memory_flags)
+            .move_or_throw();
+
+    // clear image
     {
-        // create texture image
-        auto image_info = VkImageCreateInfo{};
-        image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        image_info.imageType     = VK_IMAGE_TYPE_2D;
-        image_info.extent        = texture_extent;
-        image_info.mipLevels     = 1;
-        image_info.arrayLayers   = 1;
-        image_info.format        = VK_FORMAT_R32_SFLOAT;
-        image_info.tiling        = VK_IMAGE_TILING_LINEAR;
-        image_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
-        image_info.usage         = VK_IMAGE_USAGE_SAMPLED_BIT;
-        image_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
-        image_info.samples       = VK_SAMPLE_COUNT_1_BIT;
-        image_info.flags         = 0;
-
-        auto handle = VkImage{nullptr};
-        status = vkCreateImage(device, &image_info, nullptr, &handle);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        tex_image = vulkan::make_handle(handle, nullptr, [=](auto... p) {
-            vkDestroyImage(device, p...);
-        }).move_or_throw();
-
-        // create texture memory
-        auto device_memory = VkPhysicalDeviceMemoryProperties{};
-        vkGetPhysicalDeviceMemoryProperties(get_device().get_physical_device(), &device_memory);
-
-        auto mem_requirements = VkMemoryRequirements{};
-        vkGetImageMemoryRequirements(device, tex_image.get_handle(), &mem_requirements);
-
-        auto mem_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-        auto mem_index = find_memory_type_index(device_memory, mem_requirements.memoryTypeBits, mem_flags);
-
-        auto alloc_info = VkMemoryAllocateInfo{};
-        alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        alloc_info.allocationSize  = mem_requirements.size;
-        alloc_info.memoryTypeIndex = mem_index;
-
-        auto mem_handle = VkDeviceMemory{nullptr};
-        status = vkAllocateMemory(device, &alloc_info, nullptr, &mem_handle);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        tex_memory = vulkan::make_handle(mem_handle, nullptr, [=](auto... p){
-            vkFreeMemory(device, p...);
-        }).move_or_throw();
-
-        // bind memory
-        status = vkBindImageMemory(device, tex_image.get_handle(), tex_memory.get_handle(), 0);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        // clear image
-        void* data = nullptr;
-        status = vkMapMemory(device, mem_handle, 0, texture_bytes, 0, &data);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+        void* data = tex_image.map_memory(device, 0, texture_bytes, 0).move_or_throw();
         std::fill(static_cast<std::uint8_t*>(data), static_cast<std::uint8_t*>(data) + texture_bytes, 0);
-        vkUnmapMemory(device, mem_handle);
+        tex_image.unmap_memory(device);
     }
 
     // prepare for use: transition image layout
@@ -629,20 +371,12 @@ void triangle_example::setup_texture() {
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        status = vkBeginCommandBuffer(cmdbuf, &begin_info);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+        vulkan::except(vkBeginCommandBuffer(cmdbuf, &begin_info));
 
-        vkCmdPipelineBarrier(
-            cmdbuf,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            0,
-            0, nullptr,
-            0, nullptr,
-            1, &barrier
-        );
+        vkCmdPipelineBarrier(cmdbuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-        status = vkEndCommandBuffer(cmdbuf);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+        vulkan::except(vkEndCommandBuffer(cmdbuf));
 
         auto submit_info = VkSubmitInfo{};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -654,133 +388,76 @@ void triangle_example::setup_texture() {
     }
 
     // create image view
-    auto tex_view = vulkan::handle<VkImageView>{};
-    {
-        auto view_info = VkImageViewCreateInfo{};
-        view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        view_info.image    = tex_image.get_handle();
-        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view_info.format   = VK_FORMAT_R32_SFLOAT;
+    auto view_info = VkImageViewCreateInfo{};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.image    = tex_image.get_handle();
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format   = VK_FORMAT_R32_SFLOAT;
 
-        view_info.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-        view_info.subresourceRange.baseMipLevel   = 0;
-        view_info.subresourceRange.levelCount     = 1;
-        view_info.subresourceRange.baseArrayLayer = 0;
-        view_info.subresourceRange.layerCount     = 1;
+    view_info.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.baseMipLevel   = 0;
+    view_info.subresourceRange.levelCount     = 1;
+    view_info.subresourceRange.baseArrayLayer = 0;
+    view_info.subresourceRange.layerCount     = 1;
 
-        auto handle = VkImageView{nullptr};
-        status = vkCreateImageView(device, &view_info, nullptr, &handle);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        tex_view = vulkan::make_handle(handle, nullptr, [=](auto... p){
-            vkDestroyImageView(device, p...);
-        }).move_or_throw();
-    }
+    auto tex_view = vulkan::make_image_view(device, view_info).move_or_throw();
 
     // create sampler
-    auto tex_sampler = vulkan::handle<VkSampler>{};
-    {
-        auto sampler_info = VkSamplerCreateInfo{};
-        sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        sampler_info.magFilter               = VK_FILTER_LINEAR;
-        sampler_info.minFilter               = VK_FILTER_LINEAR;
-        sampler_info.addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sampler_info.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sampler_info.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sampler_info.anisotropyEnable        = true;
-        sampler_info.maxAnisotropy           = 16;
-        sampler_info.borderColor             = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-        sampler_info.unnormalizedCoordinates = true;
-        sampler_info.compareEnable           = false;
-        sampler_info.compareOp               = VK_COMPARE_OP_ALWAYS;
-        sampler_info.mipmapMode              = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-        sampler_info.mipLodBias              = 0.0f;
-        sampler_info.minLod                  = 0.0f;
-        sampler_info.maxLod                  = 0.0f;
+    auto sampler_info = VkSamplerCreateInfo{};
+    sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_info.magFilter               = VK_FILTER_LINEAR;
+    sampler_info.minFilter               = VK_FILTER_LINEAR;
+    sampler_info.addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.anisotropyEnable        = true;
+    sampler_info.maxAnisotropy           = 16;
+    sampler_info.borderColor             = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    sampler_info.unnormalizedCoordinates = true;
+    sampler_info.compareEnable           = false;
+    sampler_info.compareOp               = VK_COMPARE_OP_ALWAYS;
+    sampler_info.mipmapMode              = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sampler_info.mipLodBias              = 0.0f;
+    sampler_info.minLod                  = 0.0f;
+    sampler_info.maxLod                  = 0.0f;
 
-        auto handle = VkSampler{nullptr};
-        status = vkCreateSampler(device, &sampler_info, nullptr, &handle);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-        tex_sampler = vulkan::make_handle(handle, nullptr, [=](auto... p){
-            vkDestroySampler(device, p...);
-        }).move_or_throw();
-    }
+    auto tex_sampler = vulkan::make_sampler(device, sampler_info).move_or_throw();
 
     // sampler uniform binding
-    {
-        auto image_info = VkDescriptorImageInfo{};
-        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        image_info.imageView   = tex_view.get_handle();
-        image_info.sampler     = tex_sampler.get_handle();
+    auto descriptor_image_info = VkDescriptorImageInfo{};
+    descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    descriptor_image_info.imageView   = tex_view.get_handle();
+    descriptor_image_info.sampler     = tex_sampler.get_handle();
 
-        auto descriptor_write = VkWriteDescriptorSet{};
-        descriptor_write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptor_write.dstSet          = descriptor_set_;
-        descriptor_write.dstBinding      = 0;
-        descriptor_write.dstArrayElement = 0;
-        descriptor_write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptor_write.descriptorCount = 1;
-        descriptor_write.pImageInfo      = &image_info;
+    auto descriptor_write = VkWriteDescriptorSet{};
+    descriptor_write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptor_write.dstSet          = descriptor_set_;
+    descriptor_write.dstBinding      = 0;
+    descriptor_write.dstArrayElement = 0;
+    descriptor_write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptor_write.descriptorCount = 1;
+    descriptor_write.pImageInfo      = &descriptor_image_info;
 
-        vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, nullptr);
-    }
+    vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, nullptr);
 
     // set handles
     texture_image_   = std::move(tex_image);
-    texture_memory_  = std::move(tex_memory);
     texture_view_    = std::move(tex_view);
     texture_sampler_ = std::move(tex_sampler);
 }
 
 void triangle_example::setup_uniform_buffer() {
-    auto device = get_device().get_handle();
-    auto status = VK_SUCCESS;
+    auto const logical  = get_device().get_handle();
+    auto const physical = get_device().get_physical_device();
+    auto const size     = sizeof(std::int32_t);
+    auto const usage    = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    auto const flags    = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-    // create uniform buffer
-    auto buffer_info = VkBufferCreateInfo{};
-    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_info.size        = sizeof(int32_t);
-    buffer_info.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto buffer = vulkan::make_exclusive_buffer(logical, physical, size, usage, flags).move_or_throw();
 
-    auto buf_handle = VkBuffer{};
-    status = vkCreateBuffer(device, &buffer_info, nullptr, &buf_handle);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-    auto buffer = vulkan::make_handle(buf_handle, nullptr, [=](auto... p){
-        vkDestroyBuffer(device, p...);
-    }).move_or_throw();
-
-    // allocate buffer memory
-    auto mem_requirements = VkMemoryRequirements{};
-    vkGetBufferMemoryRequirements(device, buf_handle, &mem_requirements);
-
-    auto mem_properties = VkPhysicalDeviceMemoryProperties{};
-    vkGetPhysicalDeviceMemoryProperties(get_device().get_physical_device(), &mem_properties);
-
-    auto flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    auto index = find_memory_type_index(mem_properties, mem_requirements.memoryTypeBits, flags);
-
-    auto alloc_info = VkMemoryAllocateInfo{};
-    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc_info.allocationSize  = mem_requirements.size;
-    alloc_info.memoryTypeIndex = index;
-
-    auto mem_handle = VkDeviceMemory{};
-    status = vkAllocateMemory(device, &alloc_info, nullptr, &mem_handle);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
-    auto memory = vulkan::make_handle(mem_handle, nullptr, [=](auto... p){
-        vkFreeMemory(device, p...);
-    }).move_or_throw();
-
-    // bind memory
-    status = vkBindBufferMemory(device, buf_handle, mem_handle, 0);
-    if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
+    // set up descriptors
     auto desc_info = VkDescriptorBufferInfo{};
-    desc_info.buffer = buf_handle;
+    desc_info.buffer = buffer.get_handle();
     desc_info.offset = 0;
     desc_info.range  = sizeof(int32_t);
 
@@ -793,15 +470,14 @@ void triangle_example::setup_uniform_buffer() {
     desc_write.descriptorCount = 1;
     desc_write.pBufferInfo     = &desc_info;
 
-    vkUpdateDescriptorSets(device, 1, &desc_write, 0, nullptr);
+    vkUpdateDescriptorSets(logical, 1, &desc_write, 0, nullptr);
 
-    ubo_buffer_        = std::move(buffer);
-    ubo_buffer_memory_ = std::move(memory);
+    uniform_buffer_ = std::move(buffer);
 }
 
 void triangle_example::setup_command_buffers() {
     // create command buffers
-    VkCommandBufferAllocateInfo alloc_info = {};
+    auto alloc_info = VkCommandBufferAllocateInfo{};
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     alloc_info.commandPool        = command_pool_.get_handle();
     alloc_info.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -813,13 +489,12 @@ void triangle_example::setup_command_buffers() {
     for (std::size_t i = 0; i < command_buffers.size(); i++) {
         auto const buffer = command_buffers[i];
 
-        VkCommandBufferBeginInfo begin_info = {};
+        auto begin_info = VkCommandBufferBeginInfo{};
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         begin_info.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
         begin_info.pInheritanceInfo = nullptr;
 
-        VkResult status = vkBeginCommandBuffer(buffer, &begin_info);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+        vulkan::except(vkBeginCommandBuffer(buffer, &begin_info));
 
         // transform texture-layout to be accessed by shader-read
         auto img_barrier_start = VkImageMemoryBarrier{};
@@ -838,18 +513,13 @@ void triangle_example::setup_command_buffers() {
         img_barrier_start.subresourceRange.baseArrayLayer = 0;
         img_barrier_start.subresourceRange.layerCount     = 1;
 
-        vkCmdPipelineBarrier(
-            buffer,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
-            0, nullptr,
-            0, nullptr,
-            1, &img_barrier_start
-        );
+        vkCmdPipelineBarrier(buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
+                0, nullptr, 0, nullptr, 1, &img_barrier_start);
 
         // main draw commands
-        VkClearValue clear_color = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+        auto const clear_color = VkClearValue{{{0.0f, 0.0f, 0.0f, 1.0f}}};
 
-        VkRenderPassBeginInfo pass_info = {};
+        auto pass_info = VkRenderPassBeginInfo{};
         pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         pass_info.renderPass        = renderpass_.get_handle();
         pass_info.framebuffer       = framebuffers_[i].get_handle();
@@ -863,14 +533,7 @@ void triangle_example::setup_command_buffers() {
         vkCmdBindDescriptorSets(buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_.get_handle(), 0, 1,
                 &descriptor_set_, 0, nullptr);
 
-        VkBuffer vertex_buffers[] = {vertex_buffer_.get_handle()};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(buffer, 0, 1, vertex_buffers, offsets);
-
-        VkDeviceSize index_offset = sizeof(vulkan::screenquad::vertices[0]) * vulkan::screenquad::vertices.size();
-        vkCmdBindIndexBuffer(buffer, vertex_buffer_.get_handle(), index_offset, VK_INDEX_TYPE_UINT16);
-
-        vkCmdDrawIndexed(buffer, vulkan::screenquad::indices.size(), 1, 0, 0, 0);
+        screenquad_.cmd_draw(buffer);
 
         vkCmdEndRenderPass(buffer);
 
@@ -891,16 +554,10 @@ void triangle_example::setup_command_buffers() {
         img_barrier_end.subresourceRange.baseArrayLayer = 0;
         img_barrier_end.subresourceRange.layerCount     = 1;
 
-        vkCmdPipelineBarrier(
-            buffer,
-            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
-            0, nullptr,
-            0, nullptr,
-            1, &img_barrier_end
-        );
+        vkCmdPipelineBarrier(buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
+                0, nullptr, 0, nullptr, 1, &img_barrier_end);
 
-        status = vkEndCommandBuffer(buffer);
-        if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
+        vulkan::except(vkEndCommandBuffer(buffer));
     }
 
     command_buffers_ = std::move(command_buffers);
@@ -912,14 +569,28 @@ void triangle_example::setup_semaphores() {
 }
 
 void triangle_example::cb_destroy() {
-    // TODO
     sem_img_available_.destroy();
     sem_img_finished_.destroy();
+    uniform_buffer_.destroy();
+
     command_buffers_.destroy();
     command_pool_.destroy();
+
+    texture_sampler_.destroy();
+    texture_view_.destroy();
+    texture_image_.destroy();
+
+    screenquad_.destroy();
+
     framebuffers_.clear();
+
     pipeline_.destroy();
     pipeline_layout_.destroy();
+
+    descriptor_set_ = nullptr;
+    descriptor_pool_.destroy();
+    descriptor_layout_.destroy();
+
     renderpass_.destroy();
 
     vert_shader_module_.destroy();
@@ -928,9 +599,7 @@ void triangle_example::cb_destroy() {
 
 void triangle_example::cb_display() {
     using clock = std::chrono::high_resolution_clock;
-    auto start_frame = clock::now();
-
-    VkResult status = VK_SUCCESS;
+    auto const start_frame = clock::now();
 
     // synchronize for device-access to texture-image
     vulkan::except(get_device().get_graphics_queue().wait_idle());
@@ -945,8 +614,7 @@ void triangle_example::cb_display() {
             auto const chunk_bytes  = chunk_size * 4;
             auto const offset_bytes = texture_offset_ * chunk_bytes;
 
-            void* data = nullptr;
-            vulkan::except(vkMapMemory(device, texture_memory_.get_handle(), offset_bytes, chunk_bytes, 0, &data));
+            void* data = texture_image_.map_memory(device, offset_bytes, chunk_bytes, 0).move_or_throw();
 
             auto rnd_gen  = std::mt19937{std::random_device{}()};
             auto rnd_dist = std::uniform_real_distribution<float>{0.f, 1.f};
@@ -954,18 +622,14 @@ void triangle_example::cb_display() {
                 return rnd_dist(rnd_gen);
             });
 
-            vkUnmapMemory(device, texture_memory_.get_handle());
+            texture_image_.unmap_memory(get_device().get_handle());
         }
 
         // update uniform buffer
         {
-            void* data = nullptr;
-            status = vkMapMemory(device, ubo_buffer_memory_.get_handle(), 0, sizeof(std::int32_t), 0, &data);
-            if (status != VK_SUCCESS) throw vulkan::exception(vulkan::to_result(status));
-
+            void* data = uniform_buffer_.map_memory(device, 0, sizeof(std::int32_t), 0).move_or_throw();
             *static_cast<std::int32_t*>(data) = texture_offset_ + 1;
-
-            vkUnmapMemory(device, ubo_buffer_memory_.get_handle());
+            uniform_buffer_.unmap_memory(device);
         }
 
         texture_offset_++;
@@ -974,23 +638,23 @@ void triangle_example::cb_display() {
     }
 
     // render texture to screen
-    VkSemaphore sem_img_available = sem_img_available_.get_handle();
-    VkSemaphore sem_img_finished  = sem_img_finished_.get_handle();
+    auto const sem_img_available = sem_img_available_.get_handle();
+    auto const sem_img_finished  = sem_img_finished_.get_handle();
 
     std::uint32_t image_index = 0;
-    status = vkAcquireNextImageKHR(get_device().get_handle(), get_swapchain().get_swapchain(),
+    auto status = vkAcquireNextImageKHR(get_device().get_handle(), get_swapchain().get_swapchain(),
             std::numeric_limits<std::uint64_t>::max(), sem_img_available, nullptr, &image_index);
 
     if (status == VK_ERROR_OUT_OF_DATE_KHR || status == VK_SUBOPTIMAL_KHR)
         return;
-    if (status != VK_SUCCESS)
-        throw vulkan::exception(status);
 
-    VkPipelineStageFlags wait_stages[]  = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    VkCommandBuffer      command_buffer = command_buffers_[image_index];
-    VkSwapchainKHR       swapchain      = get_swapchain().get_swapchain();
+    vulkan::except(status);
 
-    VkSubmitInfo submit_info = {};
+    VkPipelineStageFlags const wait_stages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+    auto const command_buffer = command_buffers_[image_index];
+    auto const swapchain      = get_swapchain().get_swapchain();
+
+    auto submit_info = VkSubmitInfo{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.waitSemaphoreCount   = 1;
     submit_info.pWaitSemaphores      = &sem_img_available;
@@ -1002,7 +666,7 @@ void triangle_example::cb_display() {
 
     vulkan::except(get_device().get_graphics_queue().submit(1, &submit_info, nullptr));
 
-    VkPresentInfoKHR present_info = {};
+    auto present_info = VkPresentInfoKHR{};
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     present_info.waitSemaphoreCount = 1;
     present_info.pWaitSemaphores    = &sem_img_finished;
@@ -1013,8 +677,9 @@ void triangle_example::cb_display() {
 
     vulkan::except(get_device().get_present_queue().present_khr(present_info));
 
-    auto delta_frame = clock::now() - start_frame;
-    std::cout << "frame-time: " << std::chrono::duration_cast<std::chrono::microseconds>(delta_frame).count() << u8"µs\n";
+    auto const delta_frame = clock::now() - start_frame;
+    std::cout << "frame-time: " << std::chrono::duration_cast<std::chrono::microseconds>(delta_frame).count()
+            << u8"µs\n";
 }
 
 void triangle_example::cb_resize(unsigned int width, unsigned int height) noexcept {
@@ -1032,9 +697,9 @@ void triangle_example::cb_input_key(int key, int scancode, int action, int mods)
 }
 
 auto triangle_example::select_physical_device(std::vector<VkPhysicalDevice> const& devices) const -> VkPhysicalDevice {
-    VkPhysicalDevice selected = devices[0];
+    auto selected = devices[0];
 
-    VkPhysicalDeviceProperties properties = {};
+    auto properties = VkPhysicalDeviceProperties{};
     vkGetPhysicalDeviceProperties(selected, &properties);
 
     char const* device_type = [&](){
