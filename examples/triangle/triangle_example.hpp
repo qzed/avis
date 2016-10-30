@@ -65,11 +65,9 @@ private:
     vulkan::pipeline                 pipeline_;
     std::vector<vulkan::framebuffer> framebuffers_;
     vulkan::screenquad               screenquad_;
-
     vulkan::image                    texture_image_;
-    vulkan::handle<VkImageView>      texture_view_;
-    vulkan::handle<VkSampler>        texture_sampler_;
-
+    vulkan::image_view               texture_view_;
+    vulkan::sampler                  texture_sampler_;
     vulkan::buffer                   uniform_buffer_;
     vulkan::command_pool             command_pool_;
     vulkan::command_buffers          command_buffers_;

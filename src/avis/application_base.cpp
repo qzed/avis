@@ -51,8 +51,8 @@ void application_base::setup_vulkan() {
     using std::begin;
     using std::end;
 
-    std::vector<const char*> extensions = appinfo_.vulkan_instance_extensions;
-    std::vector<const char*> layers     = {};
+    auto extensions = appinfo_.vulkan_instance_extensions;
+    auto layers     = std::vector<const char*>{};
 
     if (appinfo_.vulkan_validation_enable) {
         extensions.push_back(VK_EXT_DEBUG_REPORT_EXTENSION_NAME);
@@ -62,40 +62,40 @@ void application_base::setup_vulkan() {
     auto glfw_extensions = avis::glfw::get_required_instance_extensions();
     extensions.insert(extensions.end(), begin(glfw_extensions), end(glfw_extensions));
 
-    VkApplicationInfo app = {};
-    app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    app.applicationVersion = appinfo_.app_version;
-    app.pApplicationName   = appinfo_.app_name.c_str();
-    app.engineVersion      = appinfo_.app_version;
-    app.pEngineName        = appinfo_.app_name.c_str();
-    app.apiVersion         = appinfo_.vulkan_version;
+    auto app_info = VkApplicationInfo{};
+    app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    app_info.applicationVersion = appinfo_.app_version;
+    app_info.pApplicationName   = appinfo_.app_name.c_str();
+    app_info.engineVersion      = appinfo_.app_version;
+    app_info.pEngineName        = appinfo_.app_name.c_str();
+    app_info.apiVersion         = appinfo_.vulkan_version;
 
-    VkInstanceCreateInfo info = {};
-    info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    info.pApplicationInfo        = &app;
-    info.enabledExtensionCount   = extensions.size();
-    info.ppEnabledExtensionNames = extensions.data();
-    info.enabledLayerCount       = layers.size();
-    info.ppEnabledLayerNames     = layers.data();
+    auto instance_info = VkInstanceCreateInfo{};
+    instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    instance_info.pApplicationInfo        = &app_info;
+    instance_info.enabledExtensionCount   = extensions.size();
+    instance_info.ppEnabledExtensionNames = extensions.data();
+    instance_info.enabledLayerCount       = layers.size();
+    instance_info.ppEnabledLayerNames     = layers.data();
 
-    instance_ = avis::vulkan::instance::create(info).move_or_throw();
+    instance_ = avis::vulkan::instance::create(instance_info).move_or_throw();
 
     // setup debug-report-callback
     if (appinfo_.vulkan_validation_enable) {
-        VkDebugReportCallbackCreateInfoEXT create_info = {};
-        create_info.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT;
-        create_info.pfnCallback = &vulkan_debug_callback;
-        create_info.flags       = appinfo_.vulkan_validation_filter;
-        create_info.pUserData   = this;
+        auto debug_info = VkDebugReportCallbackCreateInfoEXT{};
+        debug_info.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT;
+        debug_info.pfnCallback = &vulkan_debug_callback;
+        debug_info.flags       = appinfo_.vulkan_validation_filter;
+        debug_info.pUserData   = this;
 
-        validation_ = instance_.create_debug_report_callback(create_info, nullptr).move_or_throw();
+        validation_ = instance_.create_debug_report_callback(debug_info, nullptr).move_or_throw();
     }
 
     // setup window
     window_.create(instance_);
 
     // setup device
-    std::vector<VkPhysicalDevice> devices = instance_.enumerate_physical_devices().move_or_throw();
+    auto devices = instance_.enumerate_physical_devices().move_or_throw();
     if (devices.empty())
         throw std::runtime_error("No devices with Vulkan support found.");
 
@@ -113,7 +113,7 @@ auto application_base::vulkan_debug_callback(VkDebugReportFlagsEXT flags, VkDebu
         uint64_t source_object, size_t location, int32_t code, const char* layer_prefix, const char* message,
         void* user_data) noexcept -> VkBool32 {
 
-    application_base* self = reinterpret_cast<application_base*>(user_data);
+    auto self = reinterpret_cast<application_base*>(user_data);
     return self->cb_validation(flags, object_type, source_object, location, code, layer_prefix, message);
 }
 
@@ -151,7 +151,9 @@ auto application_base::cb_validation(VkDebugReportFlagsEXT flags, VkDebugReportO
 
 // config functions
 
-auto application_base::select_physical_device(std::vector<VkPhysicalDevice> const& devices) const -> VkPhysicalDevice {
+auto application_base::select_physical_device(std::vector<VkPhysicalDevice> const& devices) const
+        -> VkPhysicalDevice
+{
     return devices[0];
 }
 
