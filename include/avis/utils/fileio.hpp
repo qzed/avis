@@ -7,7 +7,7 @@
 namespace avis {
 namespace utils {
 
-std::vector<char> read_file_to_vector(const std::string& filename) {
+inline auto read_file_to_vector(const std::string& filename) -> std::vector<char> {
     auto file = std::ifstream();
     file.exceptions(std::ios::failbit | std::ios::badbit);
     file.open(filename, std::ios::ate | std::ios::binary);
