@@ -47,6 +47,7 @@ private:
     void setup_screenquad();
     void setup_texture();
     void setup_uniform_buffer();
+    void setup_transfer_cmdbuffer();
     void setup_command_buffers();
     void setup_semaphores();
 
@@ -68,8 +69,10 @@ private:
     vulkan::image                    texture_image_;
     vulkan::image_view               texture_view_;
     vulkan::sampler                  texture_sampler_;
+    vulkan::buffer                   uniform_staging_buffer_;
     vulkan::buffer                   uniform_buffer_;
     vulkan::command_pool             command_pool_;
+    vulkan::command_buffers          transfer_cmdbuffers_;
     vulkan::command_buffers          command_buffers_;
     vulkan::semaphore                sem_img_available_;
     vulkan::semaphore                sem_img_finished_;

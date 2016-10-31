@@ -21,6 +21,7 @@ void triangle_example::cb_create() {
     setup_screenquad();
     setup_texture();
     setup_uniform_buffer();
+    setup_transfer_cmdbuffer();
     setup_command_buffers();
     setup_semaphores();
 }
@@ -447,19 +448,28 @@ void triangle_example::setup_texture() {
 }
 
 void triangle_example::setup_uniform_buffer() {
+    // create uniform buffers
     auto const logical  = get_device().get_handle();
     auto const physical = get_device().get_physical_device();
     auto const size     = sizeof(std::int32_t);
-    auto const usage    = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    auto const flags    = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-    auto buffer = vulkan::make_exclusive_buffer(logical, physical, size, usage, flags).move_or_throw();
+    auto const staging_usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    auto const staging_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+    auto const usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    auto const flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+    auto staging_buffer = vulkan::make_exclusive_buffer(logical, physical, size, staging_usage, staging_flags)
+            .move_or_throw();
+
+    auto buffer = vulkan::make_exclusive_buffer(logical, physical, size, usage, flags)
+            .move_or_throw();
 
     // set up descriptors
     auto desc_info = VkDescriptorBufferInfo{};
     desc_info.buffer = buffer.get_handle();
     desc_info.offset = 0;
-    desc_info.range  = sizeof(int32_t);
+    desc_info.range  = sizeof(std::int32_t);
 
     auto desc_write = VkWriteDescriptorSet{};
     desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -472,7 +482,37 @@ void triangle_example::setup_uniform_buffer() {
 
     vkUpdateDescriptorSets(logical, 1, &desc_write, 0, nullptr);
 
-    uniform_buffer_ = std::move(buffer);
+    uniform_staging_buffer_ = std::move(staging_buffer);
+    uniform_buffer_         = std::move(buffer);
+}
+
+void triangle_example::setup_transfer_cmdbuffer() {
+    // create transfer command buffer
+    auto alloc_info = VkCommandBufferAllocateInfo{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc_info.commandPool        = command_pool_.get_handle();
+    alloc_info.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc_info.commandBufferCount = 1;
+
+    auto command_buffers = vulkan::make_command_buffers(get_device().get_handle(), alloc_info).move_or_throw();
+    auto const command_buffer = command_buffers[0];
+
+    auto begin_info = VkCommandBufferBeginInfo{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = 0;
+    begin_info.pInheritanceInfo = nullptr;
+
+    vulkan::except(vkBeginCommandBuffer(command_buffer, &begin_info));
+
+    auto copy_region = VkBufferCopy{};
+    copy_region.srcOffset = 0;
+    copy_region.dstOffset = 0;
+    copy_region.size = sizeof(std::int32_t);
+    vkCmdCopyBuffer(command_buffer, uniform_staging_buffer_.get_handle(), uniform_buffer_.get_handle(), 1, &copy_region);
+
+    vulkan::except(vkEndCommandBuffer(command_buffer));
+
+    transfer_cmdbuffers_ = std::move(command_buffers);
 }
 
 void triangle_example::setup_command_buffers() {
@@ -601,11 +641,12 @@ void triangle_example::cb_display() {
     using clock = std::chrono::high_resolution_clock;
     auto const start_frame = clock::now();
 
-    // synchronize for device-access to texture-image
-    vulkan::except(get_device().get_graphics_queue().wait_idle());
-
     // update texture-image
     if (!paused_) {
+        // synchronize for device-access to texture-image
+        vulkan::except(get_device().get_graphics_queue().wait_idle());
+        // TODO: only necessary to wait for transfer to finish (wait for fence instead)?!
+
         auto const device = get_device().get_handle();
 
         // update texture image
@@ -627,9 +668,21 @@ void triangle_example::cb_display() {
 
         // update uniform buffer
         {
-            void* data = uniform_buffer_.map_memory(device, 0, sizeof(std::int32_t), 0).move_or_throw();
+            void* data = uniform_staging_buffer_.map_memory(device, 0, sizeof(std::int32_t), 0).move_or_throw();
             *static_cast<std::int32_t*>(data) = texture_offset_ + 1;
-            uniform_buffer_.unmap_memory(device);
+            uniform_staging_buffer_.unmap_memory(device);
+        }
+
+        // transfer staging to device-local
+        {
+            auto command_buffer = transfer_cmdbuffers_[0];
+
+            auto submit_info = VkSubmitInfo{};
+            submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submit_info.commandBufferCount = 1;
+            submit_info.pCommandBuffers    = &command_buffer;
+
+            vulkan::except(vkQueueSubmit(get_device().get_graphics_queue().handle(), 1, &submit_info, nullptr));
         }
 
         texture_offset_++;
