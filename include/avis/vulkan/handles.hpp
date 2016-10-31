@@ -11,6 +11,7 @@ namespace vulkan {
 
 using render_pass           = handle<VkRenderPass>;
 using semaphore             = handle<VkSemaphore>;
+using fence                 = handle<VkFence>;
 using shader_module         = handle<VkShaderModule>;
 using descriptor_set_layout = handle<VkDescriptorSetLayout>;
 using descriptor_pool       = handle<VkDescriptorPool>;
@@ -51,6 +52,24 @@ inline auto make_semaphore(VkDevice device, VkAllocationCallbacks const* alloc =
     create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
     return make_semaphore(device, create_info, alloc);
+}
+
+inline auto make_fence(VkDevice device, VkFenceCreateInfo const& create_info,
+        VkAllocationCallbacks const* alloc = nullptr) noexcept -> expected<fence>
+{
+    auto handle = VkFence{};
+    AVIS_VULKAN_EXCEPT_RETURN(vkCreateFence(device, &create_info, alloc, &handle));
+
+    return vulkan::make_handle(handle, alloc, [=](auto... p){
+        vkDestroyFence(device, p...);
+    });
+}
+
+inline auto make_fence(VkDevice device, VkAllocationCallbacks const* alloc = nullptr) noexcept -> expected<fence> {
+    VkFenceCreateInfo create_info = {};
+    create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+
+    return make_fence(device, create_info, alloc);
 }
 
 inline auto make_shader_module(VkDevice device, std::vector<char> code, VkAllocationCallbacks const* alloc = nullptr)

@@ -323,7 +323,7 @@ void triangle_example::setup_texture() {
     staging_image_info.format        = VK_FORMAT_R32_SFLOAT;
     staging_image_info.tiling        = VK_IMAGE_TILING_LINEAR;
     staging_image_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
-    staging_image_info.usage         = VK_IMAGE_USAGE_SAMPLED_BIT;
+    staging_image_info.usage         = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     staging_image_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
     staging_image_info.samples       = VK_SAMPLE_COUNT_1_BIT;
     staging_image_info.flags         = 0;
@@ -342,7 +342,7 @@ void triangle_example::setup_texture() {
     image_info.format        = VK_FORMAT_R32_SFLOAT;
     image_info.tiling        = VK_IMAGE_TILING_LINEAR;
     image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    image_info.usage         = VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     image_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
     image_info.samples       = VK_SAMPLE_COUNT_1_BIT;
     image_info.flags         = 0;
@@ -384,8 +384,8 @@ void triangle_example::setup_texture() {
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image               = tex_image.get_handle();
-        barrier.srcAccessMask       = VK_ACCESS_HOST_WRITE_BIT;
-        barrier.dstAccessMask       = VK_ACCESS_HOST_WRITE_BIT;
+        barrier.srcAccessMask       = 0;
+        barrier.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
 
         barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
         barrier.subresourceRange.baseMipLevel   = 0;
@@ -693,6 +693,11 @@ void triangle_example::setup_command_buffers() {
 void triangle_example::setup_semaphores() {
     sem_img_available_ = vulkan::make_semaphore(get_device().get_handle()).move_or_throw();
     sem_img_finished_  = vulkan::make_semaphore(get_device().get_handle()).move_or_throw();
+
+    auto fence_info = VkFenceCreateInfo{};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    staging_fence_     = vulkan::make_fence(get_device().get_handle(), fence_info).move_or_throw();
 }
 
 void triangle_example::cb_destroy() {
@@ -730,11 +735,12 @@ void triangle_example::cb_display() {
 
     // update texture-image
     if (!paused_) {
-        // synchronize for device-access to texture-image
-        vulkan::except(get_device().get_graphics_queue().wait_idle());
-        // TODO: only necessary to wait for transfer to finish (wait for fence instead)?!
-
         auto const device = get_device().get_handle();
+        auto const fence  = staging_fence_.get_handle();
+
+        // synchronize for device-access to texture-image
+        vulkan::except(vkWaitForFences(device, 1, &fence, true, std::numeric_limits<std::uint64_t>::max()));
+        vulkan::except(vkResetFences(device, 1, &fence));
 
         // update texture image
         {
@@ -769,7 +775,7 @@ void triangle_example::cb_display() {
             submit_info.commandBufferCount = 1;
             submit_info.pCommandBuffers    = &command_buffer;
 
-            vulkan::except(vkQueueSubmit(get_device().get_graphics_queue().handle(), 1, &submit_info, nullptr));
+            vulkan::except(vkQueueSubmit(get_device().get_graphics_queue().handle(), 1, &submit_info, fence));
         }
 
         texture_offset_++;

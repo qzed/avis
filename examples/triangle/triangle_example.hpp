@@ -75,8 +75,10 @@ private:
     vulkan::command_pool             command_pool_;
     vulkan::command_buffers          transfer_cmdbuffers_;
     vulkan::command_buffers          command_buffers_;
+
     vulkan::semaphore                sem_img_available_;
     vulkan::semaphore                sem_img_finished_;
+    vulkan::fence                    staging_fence_;
 };
 
 } /* namespace avis */
