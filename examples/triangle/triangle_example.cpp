@@ -313,7 +313,26 @@ void triangle_example::setup_screenquad() {
 void triangle_example::setup_texture() {
     auto const device = get_device().get_handle();
 
-    // create texture image
+    // create staging texture image
+    auto staging_image_info = VkImageCreateInfo{};
+    staging_image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    staging_image_info.imageType     = VK_IMAGE_TYPE_2D;
+    staging_image_info.extent        = texture_extent;
+    staging_image_info.mipLevels     = 1;
+    staging_image_info.arrayLayers   = 1;
+    staging_image_info.format        = VK_FORMAT_R32_SFLOAT;
+    staging_image_info.tiling        = VK_IMAGE_TILING_LINEAR;
+    staging_image_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    staging_image_info.usage         = VK_IMAGE_USAGE_SAMPLED_BIT;
+    staging_image_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+    staging_image_info.samples       = VK_SAMPLE_COUNT_1_BIT;
+    staging_image_info.flags         = 0;
+
+    auto memory_staging_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    auto tex_staging_image = vulkan::make_image(device, get_device().get_physical_device(), staging_image_info,
+            memory_staging_flags).move_or_throw();
+
+    // create device_local texture image
     auto image_info = VkImageCreateInfo{};
     image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     image_info.imageType     = VK_IMAGE_TYPE_2D;
@@ -322,30 +341,46 @@ void triangle_example::setup_texture() {
     image_info.arrayLayers   = 1;
     image_info.format        = VK_FORMAT_R32_SFLOAT;
     image_info.tiling        = VK_IMAGE_TILING_LINEAR;
-    image_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     image_info.usage         = VK_IMAGE_USAGE_SAMPLED_BIT;
     image_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
     image_info.samples       = VK_SAMPLE_COUNT_1_BIT;
     image_info.flags         = 0;
 
-    auto memory_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+    auto memory_flags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     auto tex_image = vulkan::make_image(device, get_device().get_physical_device(), image_info, memory_flags)
             .move_or_throw();
 
-    // clear image
+    // clear staging image
     {
-        void* data = tex_image.map_memory(device, 0, texture_bytes, 0).move_or_throw();
+        void* data = tex_staging_image.map_memory(device, 0, texture_bytes, 0).move_or_throw();
         std::fill(static_cast<std::uint8_t*>(data), static_cast<std::uint8_t*>(data) + texture_bytes, 0);
-        tex_image.unmap_memory(device);
+        tex_staging_image.unmap_memory(device);
     }
 
-    // prepare for use: transition image layout
+    // prepare for use: transition image layouts
     {
-        // prepare for use: create memory barrier to transform layout
+        // prepare for use: create memory barriers to transform layouts
+        auto staging_barrier = VkImageMemoryBarrier{};
+        staging_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        staging_barrier.oldLayout           = VK_IMAGE_LAYOUT_PREINITIALIZED;
+        staging_barrier.newLayout           = VK_IMAGE_LAYOUT_GENERAL;
+        staging_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        staging_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        staging_barrier.image               = tex_staging_image.get_handle();
+        staging_barrier.srcAccessMask       = VK_ACCESS_HOST_WRITE_BIT;
+        staging_barrier.dstAccessMask       = VK_ACCESS_HOST_WRITE_BIT;
+
+        staging_barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        staging_barrier.subresourceRange.baseMipLevel   = 0;
+        staging_barrier.subresourceRange.levelCount     = 1;
+        staging_barrier.subresourceRange.baseArrayLayer = 0;
+        staging_barrier.subresourceRange.layerCount     = 1;
+
         auto barrier = VkImageMemoryBarrier{};
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.oldLayout           = VK_IMAGE_LAYOUT_PREINITIALIZED;
-        barrier.newLayout           = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image               = tex_image.get_handle();
@@ -373,6 +408,9 @@ void triangle_example::setup_texture() {
         begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
         vulkan::except(vkBeginCommandBuffer(cmdbuf, &begin_info));
+
+        vkCmdPipelineBarrier(cmdbuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &staging_barrier);
 
         vkCmdPipelineBarrier(cmdbuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
             0, 0, nullptr, 0, nullptr, 1, &barrier);
@@ -442,9 +480,10 @@ void triangle_example::setup_texture() {
     vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, nullptr);
 
     // set handles
-    texture_image_   = std::move(tex_image);
-    texture_view_    = std::move(tex_view);
-    texture_sampler_ = std::move(tex_sampler);
+    texture_staging_image_ = std::move(tex_staging_image);
+    texture_image_         = std::move(tex_image);
+    texture_view_          = std::move(tex_view);
+    texture_sampler_       = std::move(tex_sampler);
 }
 
 void triangle_example::setup_uniform_buffer() {
@@ -504,11 +543,59 @@ void triangle_example::setup_transfer_cmdbuffer() {
 
     vulkan::except(vkBeginCommandBuffer(command_buffer, &begin_info));
 
-    auto copy_region = VkBufferCopy{};
-    copy_region.srcOffset = 0;
-    copy_region.dstOffset = 0;
-    copy_region.size = sizeof(std::int32_t);
-    vkCmdCopyBuffer(command_buffer, uniform_staging_buffer_.get_handle(), uniform_buffer_.get_handle(), 1, &copy_region);
+    // transition image to transfer-src layout
+    auto img_barrier_start = VkImageMemoryBarrier{};
+    img_barrier_start.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    img_barrier_start.oldLayout           = VK_IMAGE_LAYOUT_GENERAL;
+    img_barrier_start.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    img_barrier_start.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    img_barrier_start.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    img_barrier_start.image               = texture_staging_image_.get_handle();
+    img_barrier_start.srcAccessMask       = VK_ACCESS_HOST_WRITE_BIT;
+    img_barrier_start.dstAccessMask       = VK_ACCESS_TRANSFER_READ_BIT;
+
+    img_barrier_start.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    img_barrier_start.subresourceRange.baseMipLevel   = 0;
+    img_barrier_start.subresourceRange.levelCount     = 1;
+    img_barrier_start.subresourceRange.baseArrayLayer = 0;
+    img_barrier_start.subresourceRange.layerCount     = 1;
+
+    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+            0, nullptr, 0, nullptr, 1, &img_barrier_start);
+
+    auto img_copy = VkImageCopy{};
+    img_copy.srcOffset      = {0, 0, 0};
+    img_copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    img_copy.dstOffset      = {0, 0, 0};
+    img_copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    img_copy.extent         = texture_extent;
+    vkCmdCopyImage(command_buffer, texture_staging_image_.get_handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            texture_image_.get_handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &img_copy);
+
+    auto img_barrier_stop = VkImageMemoryBarrier{};
+    img_barrier_stop.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    img_barrier_stop.oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    img_barrier_stop.newLayout           = VK_IMAGE_LAYOUT_GENERAL;
+    img_barrier_stop.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    img_barrier_stop.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    img_barrier_stop.image               = texture_staging_image_.get_handle();
+    img_barrier_stop.srcAccessMask       = VK_ACCESS_TRANSFER_READ_BIT;
+    img_barrier_stop.dstAccessMask       = VK_ACCESS_HOST_WRITE_BIT;
+
+    img_barrier_stop.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    img_barrier_stop.subresourceRange.baseMipLevel   = 0;
+    img_barrier_stop.subresourceRange.levelCount     = 1;
+    img_barrier_stop.subresourceRange.baseArrayLayer = 0;
+    img_barrier_stop.subresourceRange.layerCount     = 1;
+
+    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0,
+            0, nullptr, 0, nullptr, 1, &img_barrier_stop);
+
+    auto buf_copy = VkBufferCopy{};
+    buf_copy.srcOffset = 0;
+    buf_copy.dstOffset = 0;
+    buf_copy.size = sizeof(std::int32_t);
+    vkCmdCopyBuffer(command_buffer, uniform_staging_buffer_.get_handle(), uniform_buffer_.get_handle(), 1, &buf_copy);
 
     vulkan::except(vkEndCommandBuffer(command_buffer));
 
@@ -539,12 +626,12 @@ void triangle_example::setup_command_buffers() {
         // transform texture-layout to be accessed by shader-read
         auto img_barrier_start = VkImageMemoryBarrier{};
         img_barrier_start.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        img_barrier_start.oldLayout           = VK_IMAGE_LAYOUT_GENERAL;
+        img_barrier_start.oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         img_barrier_start.newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         img_barrier_start.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         img_barrier_start.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         img_barrier_start.image               = texture_image_.get_handle();
-        img_barrier_start.srcAccessMask       = VK_ACCESS_HOST_WRITE_BIT;
+        img_barrier_start.srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
         img_barrier_start.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
 
         img_barrier_start.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -553,7 +640,7 @@ void triangle_example::setup_command_buffers() {
         img_barrier_start.subresourceRange.baseArrayLayer = 0;
         img_barrier_start.subresourceRange.layerCount     = 1;
 
-        vkCmdPipelineBarrier(buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
+        vkCmdPipelineBarrier(buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
                 0, nullptr, 0, nullptr, 1, &img_barrier_start);
 
         // main draw commands
@@ -581,12 +668,12 @@ void triangle_example::setup_command_buffers() {
         auto img_barrier_end = VkImageMemoryBarrier{};
         img_barrier_end.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         img_barrier_end.oldLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        img_barrier_end.newLayout           = VK_IMAGE_LAYOUT_GENERAL;
+        img_barrier_end.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         img_barrier_end.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         img_barrier_end.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         img_barrier_end.image               = texture_image_.get_handle();
         img_barrier_end.srcAccessMask       = VK_ACCESS_SHADER_READ_BIT;
-        img_barrier_end.dstAccessMask       = VK_ACCESS_HOST_WRITE_BIT;
+        img_barrier_end.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
 
         img_barrier_end.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
         img_barrier_end.subresourceRange.baseMipLevel   = 0;
@@ -594,7 +681,7 @@ void triangle_example::setup_command_buffers() {
         img_barrier_end.subresourceRange.baseArrayLayer = 0;
         img_barrier_end.subresourceRange.layerCount     = 1;
 
-        vkCmdPipelineBarrier(buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0,
+        vkCmdPipelineBarrier(buffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
                 0, nullptr, 0, nullptr, 1, &img_barrier_end);
 
         vulkan::except(vkEndCommandBuffer(buffer));
@@ -655,7 +742,7 @@ void triangle_example::cb_display() {
             auto const chunk_bytes  = chunk_size * 4;
             auto const offset_bytes = texture_offset_ * chunk_bytes;
 
-            void* data = texture_image_.map_memory(device, offset_bytes, chunk_bytes, 0).move_or_throw();
+            void* data = texture_staging_image_.map_memory(device, offset_bytes, chunk_bytes, 0).move_or_throw();
 
             auto rnd_gen  = std::mt19937{std::random_device{}()};
             auto rnd_dist = std::uniform_real_distribution<float>{0.f, 1.f};
@@ -663,7 +750,7 @@ void triangle_example::cb_display() {
                 return rnd_dist(rnd_gen);
             });
 
-            texture_image_.unmap_memory(get_device().get_handle());
+            texture_staging_image_.unmap_memory(get_device().get_handle());
         }
 
         // update uniform buffer

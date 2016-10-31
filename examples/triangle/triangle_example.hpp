@@ -66,6 +66,7 @@ private:
     vulkan::pipeline                 pipeline_;
     std::vector<vulkan::framebuffer> framebuffers_;
     vulkan::screenquad               screenquad_;
+    vulkan::image                    texture_staging_image_;
     vulkan::image                    texture_image_;
     vulkan::image_view               texture_view_;
     vulkan::sampler                  texture_sampler_;
