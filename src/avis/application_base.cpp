@@ -78,7 +78,7 @@ void application_base::setup_vulkan() {
     instance_info.enabledLayerCount       = layers.size();
     instance_info.ppEnabledLayerNames     = layers.data();
 
-    instance_ = avis::vulkan::instance::create(instance_info).move_or_throw();
+    instance_ = vulkan::make_instance(instance_info).move_or_throw();
 
     // setup debug-report-callback
     if (appinfo_.vulkan_validation_enable) {
@@ -88,7 +88,7 @@ void application_base::setup_vulkan() {
         debug_info.flags       = appinfo_.vulkan_validation_filter;
         debug_info.pUserData   = this;
 
-        validation_ = instance_.create_debug_report_callback(debug_info, nullptr).move_or_throw();
+        validation_ = instance_.create_debug_report_callback(debug_info).move_or_throw();
     }
 
     // setup window
@@ -104,7 +104,7 @@ void application_base::setup_vulkan() {
             .move_or_throw();
 
     // setup swapchain
-    swapchain_ = vulkan::swapchain::create(device_, window_, nullptr).move_or_throw();
+    swapchain_ = vulkan::make_swapchain(device_, window_).move_or_throw();
 }
 
 // debug callbacks

@@ -21,8 +21,8 @@ auto instance::create_debug_report_callback(VkDebugReportCallbackCreateInfoEXT& 
     VkDebugReportCallbackEXT callback = nullptr;
     result status = to_result(fn_create_debug_report_callback_ext_(handle_, &create_info, alloc, &callback));
     if (status == result::success) {
-        auto handle = make_handle(callback, alloc, [=](auto h, auto a) {
-            fn_destroy_debug_report_callback_ext_(handle_, h, a);
+        auto handle = make_handle(callback, alloc, [=](auto... p) {
+            fn_destroy_debug_report_callback_ext_(handle_, p...);
         });
         if (handle)
             return handle.move();

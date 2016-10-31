@@ -22,23 +22,21 @@ class instance {
 public:
     using vulkan_instance_proc = void(*)(void);
 
-    inline static auto create(VkInstanceCreateInfo const& create_info, const VkAllocationCallbacks* alloc = nullptr)
-            noexcept -> expected<instance>;
-
-    instance() : instance{nullptr, nullptr} {}
+    instance()
+            : instance{nullptr, nullptr} {}
 
     instance(VkInstance handle, VkAllocationCallbacks const* alloc = nullptr)
-        : handle_{handle}
-        , alloc_{alloc}
-        , fn_create_debug_report_callback_ext_{nullptr}
-        , fn_destroy_debug_report_callback_ext_{nullptr} {}
+            : handle_{handle}
+            , alloc_{alloc}
+            , fn_create_debug_report_callback_ext_{nullptr}
+            , fn_destroy_debug_report_callback_ext_{nullptr} {}
 
     instance(instance&& other)
-        : handle_{std::exchange(other.handle_, nullptr)}
-        , alloc_{std::exchange(other.alloc_, nullptr)}
-        , fn_create_debug_report_callback_ext_{std::exchange(other.fn_create_debug_report_callback_ext_, nullptr)}
-        , fn_destroy_debug_report_callback_ext_{std::exchange(other.fn_destroy_debug_report_callback_ext_, nullptr)}
-        {}
+            : handle_{std::exchange(other.handle_, nullptr)}
+            , alloc_{std::exchange(other.alloc_, nullptr)}
+            , fn_create_debug_report_callback_ext_{std::exchange(other.fn_create_debug_report_callback_ext_, nullptr)}
+            , fn_destroy_debug_report_callback_ext_{std::exchange(other.fn_destroy_debug_report_callback_ext_, nullptr)}
+            {}
 
     instance(instance const& other) = delete;
 
@@ -48,11 +46,11 @@ public:
     inline void destroy(VkAllocationCallbacks const* alloc) noexcept;
 
     inline auto operator= (instance const& rhs) noexcept -> instance& = delete;
-    inline auto operator= (instance&& rhs) noexcept -> instance&;
+    inline auto operator= (instance&& rhs)      noexcept -> instance&;
 
     inline auto get_handle() const noexcept -> VkInstance;
 
-    inline auto allocator() noexcept -> VkAllocationCallbacks const* &;
+    inline auto allocator()       noexcept -> VkAllocationCallbacks const* &;
     inline auto allocator() const noexcept -> VkAllocationCallbacks const* const&;
 
     inline auto release() noexcept -> VkInstance;
@@ -61,10 +59,11 @@ public:
     inline auto get_proc_address(char const* name) noexcept -> vulkan_instance_proc;
 
     auto create_debug_report_callback(VkDebugReportCallbackCreateInfoEXT& create_info,
-            VkAllocationCallbacks const* alloc) noexcept -> expected<debug_report_callback>;
+            VkAllocationCallbacks const* alloc = nullptr) noexcept -> expected<debug_report_callback>;
 
     template <class Allocator = std::vector<VkPhysicalDevice>::allocator_type>
-    inline auto enumerate_physical_devices(Allocator const& alloc = {}) -> expected<std::vector<VkPhysicalDevice, Allocator>>;
+    inline auto enumerate_physical_devices(Allocator const& alloc = {})
+            -> expected<std::vector<VkPhysicalDevice, Allocator>>;
 
 private:
     VkInstance handle_;
@@ -76,11 +75,13 @@ private:
 };
 
 
-auto instance::create(VkInstanceCreateInfo const& create_info, const VkAllocationCallbacks* alloc) noexcept
-        -> expected<instance> {
-    VkInstance inst = nullptr;
-    VkResult result = vkCreateInstance(&create_info, alloc, &inst);
-    return {to_result(result), instance{inst, alloc}};
+inline auto make_instance(VkInstanceCreateInfo const& create_info, const VkAllocationCallbacks* alloc = nullptr)
+        noexcept -> expected<instance>
+{
+    auto inst = VkInstance{};
+    AVIS_VULKAN_EXCEPT_RETURN(vkCreateInstance(&create_info, alloc, &inst));
+
+    return {{ inst, alloc }};
 }
 
 void instance::destroy() noexcept {
@@ -128,14 +129,10 @@ template <class Allocator>
 auto instance::enumerate_physical_devices(Allocator const& alloc) -> expected<std::vector<VkPhysicalDevice, Allocator>> {
     std::uint32_t count = 0;
 
-    result status = to_result(vkEnumeratePhysicalDevices(handle_, &count, nullptr));
-    if (status != result::success)
-        return status;
+    AVIS_VULKAN_EXCEPT_RETURN(vkEnumeratePhysicalDevices(handle_, &count, nullptr));
 
-    std::vector<VkPhysicalDevice> devices{count};
-    status = to_result(vkEnumeratePhysicalDevices(handle_, &count, devices.data()));
-    if (status != result::success)
-        return status;
+    auto devices = std::vector<VkPhysicalDevice, Allocator>{count};
+    AVIS_VULKAN_EXCEPT_RETURN(vkEnumeratePhysicalDevices(handle_, &count, devices.data()));
 
     return devices;
 }

@@ -9,12 +9,12 @@ namespace vulkan {
 namespace {
 
 struct swapchain_base {
-    VkSurfaceFormatKHR               format;
-    VkPresentModeKHR                 mode;
-    VkExtent2D                       extent;
-    handle<VkSwapchainKHR>           swapchain;
-    std::vector<VkImage>             images;
-    std::vector<handle<VkImageView>> image_views;
+    VkSurfaceFormatKHR      format;
+    VkPresentModeKHR        mode;
+    VkExtent2D              extent;
+    handle<VkSwapchainKHR>  swapchain;
+    std::vector<VkImage>    images;
+    std::vector<image_view> image_views;
 
     swapchain_base() {}
 
@@ -32,10 +32,11 @@ struct swapchain_base {
 auto swapchain_recreate_base(device const& device, glfw::vulkan_window const& window, VkSwapchainKHR old,
         VkAllocationCallbacks const* alloc) noexcept -> expected<swapchain_base>
 {
-    VkResult status = VK_SUCCESS;
+    using std::begin;
+    using std::end;
 
     // select surface format
-    VkSurfaceFormatKHR format = {};
+    auto format = VkSurfaceFormatKHR{};
     auto formats = vulkan::get_physical_device_surface_formats_khr(device.get_physical_device(), window.get_surface());
     if (!formats) return formats.status();
 
@@ -45,47 +46,47 @@ auto swapchain_recreate_base(device const& device, glfw::vulkan_window const& wi
     if (formats.value().size() == 1 && formats.value()[0].format == VK_FORMAT_UNDEFINED)
         format = {VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
 
-    VkSurfaceFormatKHR preferred_format = {VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+    auto preferred_format = VkSurfaceFormatKHR{VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
     auto is_preferred_format = [&](auto const& fmt){
         return fmt.format == preferred_format.format && fmt.colorSpace == preferred_format.colorSpace;
     };
 
-    if (std::find_if(std::begin(formats.value()), std::end(formats.value()), is_preferred_format) != std::end(formats.value()))
+    if (std::find_if(begin(formats.value()), end(formats.value()), is_preferred_format) != end(formats.value()))
         format = preferred_format;
     else
         format = formats.value()[0];
 
     // select present mode
-    VkPresentModeKHR mode = {};
+    auto mode = VkPresentModeKHR{};
     auto modes = vulkan::get_physical_device_surface_present_modes_khr(device.get_physical_device(), window.get_surface());
 
     if (modes.value().empty())
         return result::error_incompatible_display_khr;
 
-    if (std::find(std::begin(modes.value()), std::end(modes.value()), VK_PRESENT_MODE_MAILBOX_KHR) != std::end(modes.value()))
+    if (std::find(begin(modes.value()), end(modes.value()), VK_PRESENT_MODE_MAILBOX_KHR) != end(modes.value()))
         mode = VK_PRESENT_MODE_MAILBOX_KHR;
     else
         mode = VK_PRESENT_MODE_FIFO_KHR;
 
     // get surface capabilities
-    VkSurfaceCapabilitiesKHR caps = {};
-    status = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device.get_physical_device(), window.get_surface(), &caps);
-    if (status != VK_SUCCESS) return to_result(status);
+    auto caps = VkSurfaceCapabilitiesKHR{};
+    AVIS_VULKAN_EXCEPT_RETURN(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device.get_physical_device(),
+            window.get_surface(), &caps));
 
     // select extent
-    VkExtent2D extent = caps.currentExtent;
+    auto extent = caps.currentExtent;
     if (extent.width == 0xFFFFFFFF && extent.height == 0xFFFFFFFF) {
         extent.width = utils::clamp(window.get_width(), caps.minImageExtent.width, caps.maxImageExtent.width);
         extent.height = utils::clamp(window.get_height(), caps.minImageExtent.height, caps.maxImageExtent.height);
     }
 
     // select number of swapchain images
-    std::uint32_t image_count = std::max(caps.minImageCount, 2U);
+    auto image_count = std::max(caps.minImageCount, 2U);
     if (caps.maxImageCount > 0)
         image_count = std::min(caps.maxImageCount, image_count);
 
     // set up swapchain create-info
-    VkSwapchainCreateInfoKHR swapchain_info = {};
+    auto swapchain_info = VkSwapchainCreateInfoKHR{};
     swapchain_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     swapchain_info.surface          = window.get_surface();
     swapchain_info.minImageCount    = image_count;
@@ -113,13 +114,12 @@ auto swapchain_recreate_base(device const& device, glfw::vulkan_window const& wi
     swapchain_info.oldSwapchain   = old;
 
     // create swapchain
-    VkDevice device_handle = device.get_handle();
+    auto const device_handle = device.get_handle();
 
-    VkSwapchainKHR swapchain_handle = nullptr;
-    status = vkCreateSwapchainKHR(device_handle, &swapchain_info, alloc, &swapchain_handle);
-    if (status != VK_SUCCESS) return to_result(status);
+    auto swapchain_handle = VkSwapchainKHR{};
+    AVIS_VULKAN_EXCEPT_RETURN(vkCreateSwapchainKHR(device_handle, &swapchain_info, alloc, &swapchain_handle));
 
-    expected<handle<VkSwapchainKHR>> swapchain = make_handle(swapchain_handle, alloc, [=](auto s, auto a){
+    auto swapchain = make_handle(swapchain_handle, alloc, [=](auto s, auto a){
         vkDestroySwapchainKHR(device_handle, s, a);
     });
     if (!swapchain) return swapchain.status();
@@ -129,7 +129,7 @@ auto swapchain_recreate_base(device const& device, glfw::vulkan_window const& wi
     if (!images) return images.status();
 
     // set up image views
-    std::vector<handle<VkImageView>> image_views;
+    auto image_views = std::vector<handle<VkImageView>>{};
     image_views.reserve(images.value().size());
 
     for (auto image : images.value()) {
@@ -150,11 +150,10 @@ auto swapchain_recreate_base(device const& device, glfw::vulkan_window const& wi
         image_view_info.subresourceRange.baseArrayLayer = 0;
         image_view_info.subresourceRange.layerCount     = 1;
 
-        VkImageView image_view_handle;
-        status = vkCreateImageView(device_handle, &image_view_info, alloc, &image_view_handle);
-        if (status != VK_SUCCESS) return to_result(status);
+        auto image_view_handle = VkImageView{};
+        AVIS_VULKAN_EXCEPT_RETURN(vkCreateImageView(device_handle, &image_view_info, alloc, &image_view_handle));
 
-        expected<handle<VkImageView>> image_view = make_handle(image_view_handle, alloc, [=](auto h, auto a){
+        auto image_view = make_handle(image_view_handle, alloc, [=](auto h, auto a){
             vkDestroyImageView(device_handle, h, a);
         });
         if (!image_view) return image_view.status();
@@ -168,10 +167,10 @@ auto swapchain_recreate_base(device const& device, glfw::vulkan_window const& wi
 } /* namespace */
 
 
-auto swapchain::create(device const& device, glfw::vulkan_window const& window, VkAllocationCallbacks const* alloc)
+auto make_swapchain(device const& device, glfw::vulkan_window const& window, VkAllocationCallbacks const* alloc)
         noexcept -> expected<swapchain>
 {
-    expected<swapchain_base> base = swapchain_recreate_base(device, window, nullptr, alloc);
+    auto base = swapchain_recreate_base(device, window, nullptr, alloc);
     if (!base) return base.status();
 
     return {{device, window, base.value().format, base.value().mode, base.value().extent,
@@ -179,8 +178,7 @@ auto swapchain::create(device const& device, glfw::vulkan_window const& window, 
 }
 
 auto swapchain::recreate() noexcept -> vulkan::result {
-    expected<swapchain_base> base = swapchain_recreate_base(*device_, *window_, swapchain_.get_handle(),
-                                                            swapchain_.allocator());
+    auto base = swapchain_recreate_base(*device_, *window_, swapchain_.get_handle(), swapchain_.allocator());
     if (!base) return base.status();
 
     image_views_ = std::move(base.value().image_views);

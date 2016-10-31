@@ -3,6 +3,7 @@
 #include <avis/vulkan/handle.hpp>
 #include <avis/vulkan/expected.hpp>
 #include <avis/vulkan/device.hpp>
+#include <avis/vulkan/handles.hpp>
 #include <avis/glfw/vulkan_window.hpp>
 #include <vector>
 
@@ -12,9 +13,6 @@ namespace vulkan {
 
 class swapchain {
 public:
-    static auto create(device const& device, glfw::vulkan_window const& surface, VkAllocationCallbacks const* alloc)
-            noexcept -> expected<swapchain>;
-
     swapchain()
             : device_{nullptr}
             , window_{nullptr}
@@ -38,10 +36,10 @@ public:
             , image_views_{std::forward<std::vector<handle<VkImageView>>>(image_views)} {}
 
     swapchain(swapchain const& other) = delete;
-    swapchain(swapchain&& other) = default;
+    swapchain(swapchain&& other)      = default;
 
     auto inline operator= (swapchain const& other) -> swapchain& = delete;
-    auto inline operator= (swapchain&&) -> swapchain& = default;
+    auto inline operator= (swapchain&&)            -> swapchain& = default;
 
     auto recreate() noexcept -> vulkan::result;
     inline void destroy() noexcept;
@@ -51,19 +49,23 @@ public:
     inline auto get_extent()         const noexcept -> VkExtent2D const&;
     inline auto get_swapchain()      const noexcept -> VkSwapchainKHR;
     inline auto get_images()         const noexcept -> std::vector<VkImage> const&;
-    inline auto get_image_views()    const noexcept -> std::vector<handle<VkImageView>> const&;
+    inline auto get_image_views()    const noexcept -> std::vector<image_view> const&;
 
 private:
-    vulkan::device const*            device_;
-    glfw::vulkan_window const*       window_;
-    VkSurfaceFormatKHR               format_;
-    VkPresentModeKHR                 mode_;
+    vulkan::device const*      device_;
+    glfw::vulkan_window const* window_;
+    VkSurfaceFormatKHR         format_;
+    VkPresentModeKHR           mode_;
 
-    VkExtent2D                       extent_;
-    handle<VkSwapchainKHR>           swapchain_;
-    std::vector<VkImage>             images_;
-    std::vector<handle<VkImageView>> image_views_;
+    VkExtent2D                 extent_;
+    handle<VkSwapchainKHR>     swapchain_;
+    std::vector<VkImage>       images_;
+    std::vector<image_view>    image_views_;
 };
+
+
+auto make_swapchain(device const& device, glfw::vulkan_window const& surface,
+        VkAllocationCallbacks const* alloc = nullptr) noexcept -> expected<swapchain>;
 
 
 void swapchain::destroy() noexcept {
@@ -96,7 +98,7 @@ auto swapchain::get_images() const noexcept -> std::vector<VkImage> const& {
     return images_;
 }
 
-auto swapchain::get_image_views() const noexcept -> std::vector<handle<VkImageView>> const& {
+auto swapchain::get_image_views() const noexcept -> std::vector<image_view> const& {
     return image_views_;
 }
 
