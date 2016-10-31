@@ -1,6 +1,6 @@
 #pragma once
 
-#include <avis/vulkan/vulkan.hpp>
+#include <avis/vulkan/handle.hpp>
 #include <avis/vulkan/expected.hpp>
 #include <vector>
 #include <algorithm>
@@ -8,6 +8,8 @@
 
 namespace avis {
 namespace vulkan {
+
+using command_buffer = handle<VkCommandBuffer>;
 
 class command_buffers {
 public:
@@ -63,6 +65,21 @@ try {
     return {{device, alloc_info.commandPool, std::move(handles)}};
 } catch (...) {
     return result::error_out_of_host_memory;
+}
+
+inline auto make_primary_command_buffer(VkDevice device, VkCommandPool pool) noexcept -> expected<command_buffer> {
+    auto alloc_info = VkCommandBufferAllocateInfo{};
+    alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc_info.commandPool        = pool;
+    alloc_info.commandBufferCount = 1;
+    alloc_info.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+
+    auto handle = VkCommandBuffer{};
+    AVIS_VULKAN_EXCEPT_RETURN(vkAllocateCommandBuffers(device, &alloc_info, &handle));
+
+    return make_handle(handle, nullptr, [=](auto h, auto a){
+        vkFreeCommandBuffers(device, pool, 1, &h);
+    });
 }
 
 

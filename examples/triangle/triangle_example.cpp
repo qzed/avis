@@ -533,15 +533,15 @@ void triangle_example::setup_transfer_cmdbuffer() {
     alloc_info.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc_info.commandBufferCount = 1;
 
-    auto command_buffers = vulkan::make_command_buffers(get_device().get_handle(), alloc_info).move_or_throw();
-    auto const command_buffer = command_buffers[0];
+    auto command_buffer = vulkan::make_primary_command_buffer(get_device().get_handle(), command_pool_.get_handle())
+            .move_or_throw();
 
     auto begin_info = VkCommandBufferBeginInfo{};
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = 0;
     begin_info.pInheritanceInfo = nullptr;
 
-    vulkan::except(vkBeginCommandBuffer(command_buffer, &begin_info));
+    vulkan::except(vkBeginCommandBuffer(command_buffer.get_handle(), &begin_info));
 
     // transition image to transfer-src layout
     auto img_barrier_start = VkImageMemoryBarrier{};
@@ -560,7 +560,7 @@ void triangle_example::setup_transfer_cmdbuffer() {
     img_barrier_start.subresourceRange.baseArrayLayer = 0;
     img_barrier_start.subresourceRange.layerCount     = 1;
 
-    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+    vkCmdPipelineBarrier(command_buffer.get_handle(), VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
             0, nullptr, 0, nullptr, 1, &img_barrier_start);
 
     auto img_copy = VkImageCopy{};
@@ -569,8 +569,9 @@ void triangle_example::setup_transfer_cmdbuffer() {
     img_copy.dstOffset      = {0, 0, 0};
     img_copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     img_copy.extent         = texture_extent;
-    vkCmdCopyImage(command_buffer, texture_staging_image_.get_handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            texture_image_.get_handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &img_copy);
+    vkCmdCopyImage(command_buffer.get_handle(), texture_staging_image_.get_handle(),
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture_image_.get_handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            1, &img_copy);
 
     auto img_barrier_stop = VkImageMemoryBarrier{};
     img_barrier_stop.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -588,18 +589,18 @@ void triangle_example::setup_transfer_cmdbuffer() {
     img_barrier_stop.subresourceRange.baseArrayLayer = 0;
     img_barrier_stop.subresourceRange.layerCount     = 1;
 
-    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0,
+    vkCmdPipelineBarrier(command_buffer.get_handle(), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0,
             0, nullptr, 0, nullptr, 1, &img_barrier_stop);
 
     auto buf_copy = VkBufferCopy{};
     buf_copy.srcOffset = 0;
     buf_copy.dstOffset = 0;
     buf_copy.size = sizeof(std::int32_t);
-    vkCmdCopyBuffer(command_buffer, uniform_staging_buffer_.get_handle(), uniform_buffer_.get_handle(), 1, &buf_copy);
+    vkCmdCopyBuffer(command_buffer.get_handle(), uniform_staging_buffer_.get_handle(), uniform_buffer_.get_handle(), 1, &buf_copy);
 
-    vulkan::except(vkEndCommandBuffer(command_buffer));
+    vulkan::except(vkEndCommandBuffer(command_buffer.get_handle()));
 
-    transfer_cmdbuffers_ = std::move(command_buffers);
+    transfer_cmdbuffer_ = std::move(command_buffer);
 }
 
 void triangle_example::setup_command_buffers() {
@@ -768,7 +769,7 @@ void triangle_example::cb_display() {
 
         // transfer staging to device-local
         {
-            auto command_buffer = transfer_cmdbuffers_[0];
+            auto command_buffer = transfer_cmdbuffer_.get_handle();
 
             auto submit_info = VkSubmitInfo{};
             submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;

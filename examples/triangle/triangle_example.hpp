@@ -73,7 +73,7 @@ private:
     vulkan::buffer                   uniform_staging_buffer_;
     vulkan::buffer                   uniform_buffer_;
     vulkan::command_pool             command_pool_;
-    vulkan::command_buffers          transfer_cmdbuffers_;
+    vulkan::command_buffer           transfer_cmdbuffer_;
     vulkan::command_buffers          command_buffers_;
 
     vulkan::semaphore                sem_img_available_;
