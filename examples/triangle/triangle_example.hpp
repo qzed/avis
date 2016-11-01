@@ -47,9 +47,10 @@ private:
     void setup_screenquad();
     void setup_texture();
     void setup_uniform_buffer();
-    void setup_transfer_cmdbuffer();
     void setup_command_buffers();
     void setup_semaphores();
+
+    void setup_transfer_cmdbuffer(std::int32_t offset, std::uint32_t len);
 
 private:
     bool         paused_;
