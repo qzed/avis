@@ -1,44 +1,13 @@
 cmake_minimum_required(VERSION 3.0)
 project(avis)
 
-# TODO: proper find-scripts
 
-# glslangValidator
+#dependencies
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/modules/")
+
+find_package(Vulkan REQUIRED)
+find_package(GLFW REQUIRED)
 find_program(EXEC_GLSLANG glslangValidator)
-
-# vulkan
-find_path(VULKAN_INCLUDE_DIR
-    NAMES
-        "vulkan/vulkan.h"
-    HINTS
-        "${VULKAN_LOCATION}/include"
-        "$ENV{VULKAN_LOCATION}/include"
-    PATHS
-        "/usr/include/"
-    DOC
-        "vulkan include directory"
-)
-
-IF(WIN32)
-	find_library(VULKAN_LIBRARY NAMES vulkan-1)
-ELSE(WIN32)
-	find_library(VULKAN_LIBRARY NAMES vulkan)
-ENDIF(WIN32)
-
-# GLFW
-find_library(GLFW_LIBRARY NAMES glfw glfw3)
-
-find_path(GLFW_INCLUDE_DIR
-    NAMES
-        "GLFW/glfw3.h"
-    HINTS
-        "${GLFW_LOCATION}/include"
-        "$ENV{GLFW_LOCATION}/include"
-    PATHS
-        "/usr/include/"
-    DOC
-        "glfw include directory"
-)
 
 
 # shader compile function
@@ -53,7 +22,7 @@ endfunction()
 
 
 # base sources
-include_directories(src include ${VULKAN_INCLUDE_DIR} ${GLFW_INCLUDE_DIR})
+include_directories(src include ${VULKAN_INCLUDE_DIRS} ${GLFW_INCLUDE_DIRS})
 
 aux_source_directory(src/avis            SRC_AVIS)
 aux_source_directory(src/avis/glfw       SRC_AVIS_GLFW)
@@ -80,6 +49,6 @@ add_custom_target(shaders DEPENDS
 )
 
 add_executable(main ${SRC_AVIS_ALL} ${INC_AVIS_ALL})
-target_link_libraries(main ${GLFW_LIBRARY} ${VULKAN_LIBRARY})
+target_link_libraries(main ${GLFW_LIBRARIES} ${VULKAN_LIBRARIES})
 
 add_dependencies(main shaders)
