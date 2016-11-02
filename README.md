@@ -2,7 +2,10 @@
 Experimental Project.
 
 ## Dependencies
-- GLFW (http://www.glfw.org/)
+| Name                     | Link                                                           |
+|--------------------------|----------------------------------------------------------------|
+| GLFW                     | http://www.glfw.org/                                           |
+| glslang/glslangValidator | https://www.khronos.org/opengles/sdk/tools/Reference-Compiler/ |
 
 ## TODO
 - ringbuffer-based visualization
