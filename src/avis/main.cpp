@@ -1,6 +1,6 @@
-#include "triangle_example.hpp"
-
+#include <avis/application.hpp>
 #include <avis/glfw/initializer.hpp>
+
 #include <iostream>
 
 
@@ -27,7 +27,7 @@ int main() {
                                        | VK_DEBUG_REPORT_DEBUG_BIT_EXT
                                        | VK_DEBUG_REPORT_INFORMATION_BIT_EXT;
 
-    avis::triangle_example app{appinfo};
+    avis::application app{appinfo};
     app.create();
     app.run();
 }

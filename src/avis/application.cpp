@@ -1,4 +1,4 @@
-#include "triangle_example.hpp"
+#include <avis/application.hpp>
 
 #include <avis/utils/fileio.hpp>
 
@@ -10,7 +10,7 @@
 
 namespace avis {
 
-void triangle_example::cb_create() {
+void application::cb_create() {
     setup_shader_modules();
     setup_renderpass();
     setup_descriptors();
@@ -25,16 +25,16 @@ void triangle_example::cb_create() {
     setup_semaphores();
 }
 
-void triangle_example::setup_shader_modules() {
+void application::setup_shader_modules() {
     auto const device = get_device().get_handle();
-    auto const vert_shader_src = "./resources/triangle.vert.spv";
-    auto const frag_shader_src = "./resources/triangle.frag.spv";
+    auto const vert_shader_src = "./resources/ringbuffer.vert.spv";
+    auto const frag_shader_src = "./resources/ringbuffer.frag.spv";
 
     vert_shader_module_ = vulkan::make_shader_module(device, utils::read_file_to_vector(vert_shader_src)).move_or_throw();
     frag_shader_module_ = vulkan::make_shader_module(device, utils::read_file_to_vector(frag_shader_src)).move_or_throw();
 }
 
-void triangle_example::setup_renderpass() {
+void application::setup_renderpass() {
     auto color_attachment = VkAttachmentDescription{};
     color_attachment.format         = get_swapchain().get_surface_format().format;
     color_attachment.samples        = VK_SAMPLE_COUNT_1_BIT;
@@ -74,7 +74,7 @@ void triangle_example::setup_renderpass() {
     renderpass_ = vulkan::make_render_pass(get_device().get_handle(), create_info).move_or_throw();
 }
 
-void triangle_example::setup_descriptors() {
+void application::setup_descriptors() {
     // setup descriptor layout: texture
     auto sampler_binding = VkDescriptorSetLayoutBinding{};
     sampler_binding.binding            = 0;
@@ -133,7 +133,7 @@ void triangle_example::setup_descriptors() {
     descriptor_set_    = set;
 }
 
-void triangle_example::setup_pipeline_layout() {
+void application::setup_pipeline_layout() {
     auto layouts = std::array<VkDescriptorSetLayout, 1>{{ descriptor_layout_.get_handle() }};
 
     auto create_info = VkPipelineLayoutCreateInfo{};
@@ -146,7 +146,7 @@ void triangle_example::setup_pipeline_layout() {
     pipeline_layout_ = vulkan::make_pipeline_layout(get_device().get_handle(), create_info).move_or_throw();
 }
 
-void triangle_example::setup_pipeline() {
+void application::setup_pipeline() {
     // shader
     auto vert_shader_stage_info = VkPipelineShaderStageCreateInfo{};
     vert_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -273,7 +273,7 @@ void triangle_example::setup_pipeline() {
     pipeline_ = vulkan::make_pipeline(get_device().get_handle(), nullptr, create_info).move_or_throw();
 }
 
-void triangle_example::setup_framebuffers() {
+void application::setup_framebuffers() {
     auto const  device      = get_device().get_handle();
     auto const& image_views = get_swapchain().get_image_views();
 
@@ -296,7 +296,7 @@ void triangle_example::setup_framebuffers() {
     }
 }
 
-void triangle_example::setup_command_pool() {
+void application::setup_command_pool() {
     auto create_info = VkCommandPoolCreateInfo{};
     create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     create_info.queueFamilyIndex = get_device().get_graphics_queue().index();
@@ -304,12 +304,12 @@ void triangle_example::setup_command_pool() {
     command_pool_ = vulkan::make_command_pool(get_device().get_handle(), create_info).move_or_throw();
 }
 
-void triangle_example::setup_screenquad() {
+void application::setup_screenquad() {
     screenquad_ = vulkan::make_screenquad(get_device().get_handle(), get_device().get_physical_device(),
             command_pool_.get_handle(), get_device().get_graphics_queue().handle()).move_or_throw();
 }
 
-void triangle_example::setup_texture() {
+void application::setup_texture() {
     auto const device = get_device().get_handle();
 
     // create staging texture image
@@ -494,7 +494,7 @@ void triangle_example::setup_texture() {
     texture_sampler_       = std::move(tex_sampler);
 }
 
-void triangle_example::setup_uniform_buffer() {
+void application::setup_uniform_buffer() {
     // create uniform buffers
     auto const logical  = get_device().get_handle();
     auto const physical = get_device().get_physical_device();
@@ -533,7 +533,7 @@ void triangle_example::setup_uniform_buffer() {
     uniform_buffer_         = std::move(buffer);
 }
 
-void triangle_example::setup_transfer_cmdbuffer(std::int32_t offset, std::uint32_t len) {
+void application::setup_transfer_cmdbuffer(std::int32_t offset, std::uint32_t len) {
     // create transfer command buffer
     auto alloc_info = VkCommandBufferAllocateInfo{};
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -611,7 +611,7 @@ void triangle_example::setup_transfer_cmdbuffer(std::int32_t offset, std::uint32
     transfer_cmdbuffer_ = std::move(command_buffer);
 }
 
-void triangle_example::setup_command_buffers() {
+void application::setup_command_buffers() {
     // create command buffers
     auto alloc_info = VkCommandBufferAllocateInfo{};
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -699,7 +699,7 @@ void triangle_example::setup_command_buffers() {
     command_buffers_ = std::move(command_buffers);
 }
 
-void triangle_example::setup_semaphores() {
+void application::setup_semaphores() {
     sem_img_available_ = vulkan::make_semaphore(get_device().get_handle()).move_or_throw();
     sem_img_finished_  = vulkan::make_semaphore(get_device().get_handle()).move_or_throw();
 
@@ -709,7 +709,7 @@ void triangle_example::setup_semaphores() {
     staging_fence_     = vulkan::make_fence(get_device().get_handle(), fence_info).move_or_throw();
 }
 
-void triangle_example::cb_destroy() {
+void application::cb_destroy() {
     sem_img_available_.destroy();
     sem_img_finished_.destroy();
     uniform_buffer_.destroy();
@@ -738,7 +738,7 @@ void triangle_example::cb_destroy() {
     frag_shader_module_.destroy();
 }
 
-void triangle_example::cb_display() {
+void application::cb_display() {
     using clock = std::chrono::high_resolution_clock;
     auto const start_frame = clock::now();
 
@@ -840,21 +840,21 @@ void triangle_example::cb_display() {
             << u8"µs\n";
 }
 
-void triangle_example::cb_resize(unsigned int width, unsigned int height) noexcept {
+void application::cb_resize(unsigned int width, unsigned int height) noexcept {
     setup_renderpass();     // NOTE: format-check could avoid re-creation in certain cases
     setup_pipeline();       // NOTE: could in some cases be avoided by using dynamic state, depends on renderpass
     setup_framebuffers();
     setup_command_buffers();
 }
 
-void triangle_example::cb_input_key(int key, int scancode, int action, int mods) noexcept {
+void application::cb_input_key(int key, int scancode, int action, int mods) noexcept {
     if (key == GLFW_KEY_ESCAPE || key == GLFW_KEY_Q)
         window().set_terminate_request(true);
     else if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
         paused_ = !paused_;
 }
 
-auto triangle_example::select_physical_device(std::vector<VkPhysicalDevice> const& devices) const -> VkPhysicalDevice {
+auto application::select_physical_device(std::vector<VkPhysicalDevice> const& devices) const -> VkPhysicalDevice {
     auto selected = devices[0];
 
     auto properties = VkPhysicalDeviceProperties{};

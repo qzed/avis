@@ -17,9 +17,9 @@ constexpr auto texture_extent = VkExtent3D{4096, 1024, 1};
 constexpr auto texture_bytes  = texture_extent.width * texture_extent.height * texture_extent.depth * 4;
 
 
-class triangle_example final : private application_base {
+class application final : private application_base {
 public:
-    triangle_example(application_info const& appinfo)
+    application(application_info const& appinfo)
             : application_base(appinfo)
             , paused_{false}
             , texture_offset_{0} {}
