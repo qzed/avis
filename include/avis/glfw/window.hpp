@@ -16,25 +16,25 @@ public:
     using fn_resize_callback    = std::function<void(unsigned int, unsigned int)>;
 
     window()
-        : window_{nullptr}
-        , title_{""}
-        , width_{800}
-        , height_{600}
-        , resizable_{true} {}
+            : window_{nullptr}
+            , title_{""}
+            , width_{800}
+            , height_{600}
+            , resizable_{true} {}
 
     window(std::string title, unsigned int widht, unsigned int height, bool resizable = true)
-        : window_{nullptr}
-        , title_{std::move(title)}
-        , width_{widht}
-        , height_{height}
-        , resizable_{resizable} {}
+            : window_{nullptr}
+            , title_{std::move(title)}
+            , width_{widht}
+            , height_{height}
+            , resizable_{resizable} {}
 
     window(window&& other)
-        : window_{std::exchange(other.window_, nullptr)}
-        , title_{std::move(other.title_)}
-        , width_{other.width_}
-        , height_{other.height_}
-        , resizable_{other.resizable_} {}
+            : window_{std::exchange(other.window_, nullptr)}
+            , title_{std::move(other.title_)}
+            , width_{other.width_}
+            , height_{other.height_}
+            , resizable_{other.resizable_} { glfwSetWindowUserPointer(window_, this); }
 
     window(window&) = delete;
 
@@ -72,11 +72,16 @@ private:
 
 
 auto window::operator= (window&& other) -> window& {
+    destroy();
+
     window_    = std::exchange(other.window_, nullptr);
     title_     = std::move(other.title_);
     width_     = other.width_;
     height_    = other.height_;
     resizable_ = other.resizable_;
+
+    glfwSetWindowUserPointer(window_, this);
+
     return *this;
 }
 

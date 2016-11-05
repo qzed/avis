@@ -64,6 +64,7 @@ private:
 };
 
 auto vulkan_window::operator= (vulkan_window&& rhs) -> vulkan_window& {
+    destroy();
     window::operator=(std::forward<window>(rhs));
     instance_ = std::move(rhs.instance_);
     alloc_    = std::exchange(rhs.alloc_, nullptr);
