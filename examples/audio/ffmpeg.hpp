@@ -9,6 +9,7 @@ extern "C" {
 #include <vector>
 #include <system_error>
 #include <cinttypes>
+#include <iostream>
 
 
 namespace avis {
@@ -363,105 +364,108 @@ void audio_input_stream::close() {
 }
 
 auto audio_input_stream::read(std::uint8_t* buffer, int samples) -> int {
-    std::int64_t const output_frame_size = get_pcm_sample_size(output_format_);
+    std::int64_t const output_sample_size = get_pcm_sample_size(output_format_);
 
+    int read = 0;
+
+    // if samples are bufferd, get them
+    if (buffer_offset_ < buffer_.size()) {
+        int const num_buffered_samples = (buffer_.size() - buffer_offset_) / output_sample_size;
+        int const num_transfer_samples = std::min(num_buffered_samples, samples);
+        auto const num_transfer_bytes = num_transfer_samples * output_sample_size;
+
+        auto const copy_start = buffer_.begin() + buffer_offset_;
+        auto const copy_end   = buffer_.begin() + buffer_offset_ + num_transfer_bytes;
+
+        std::copy(copy_start, copy_end, buffer);
+        buffer_offset_ += num_transfer_bytes;
+
+        if (samples == num_transfer_samples)
+            return samples;
+
+        buffer += num_transfer_bytes;
+        read   += num_transfer_samples;
+    }
+
+    // read, decode and convert next packet
     auto packet = AVPacket{};
     av_init_packet(&packet);
 
-    int read = 0;
     while (read < samples && !eof_) {
-        // if buffered samples available, read them
-        if (buffer_offset_ < buffer_.size()) {
-            int buffered_samples = (buffer_.size() - buffer_offset_) / output_frame_size;
-            int transfer_samples = std::min(buffered_samples, samples - read);
-            int transfer_bytes = transfer_samples * output_frame_size;
+        // try to get next frame from decoder
+        int err = avcodec_receive_frame(codec_ctx_, frame_);
 
-            std::copy(buffer_.begin() + buffer_offset_, buffer_.begin() + buffer_offset_ + transfer_bytes, buffer);
+        // if no frame received, send next package to decoder
+        if (err == AVERROR(EAGAIN)) {
+            auto packet_guard = detail::on_scope_exit([&](){ av_packet_unref(&packet); });
 
-            buffer_offset_ += transfer_bytes;
-            buffer += transfer_bytes;
-            read += transfer_samples;
-
-        // read, decode and convert next package
-        } else {
-            // get next frame from decoder
-            bool got_frame = false;
-            while (!got_frame) {
-                // try to get next frame from decoder
-                int err = avcodec_receive_frame(codec_ctx_, frame_);
-
-                // if no frame received, send next package to decoder
-                if (err == AVERROR(EAGAIN)) {
-                    auto packet_guard = detail::on_scope_exit([&](){ av_packet_unref(&packet); });
-
-                    int err = av_read_frame(format_ctx_, &packet);
-                    if (err == AVERROR_EOF) {
-                        packet.size = 0;        // explicitly flush decoder
-                        packet.data = nullptr;
-                    } else {
-                        ffmpeg::except(err);
-                    }
-
-                    // NOTE: this should not return AVERROR(EAGAIN) since we are draining the decoder as much as possible
-                    ffmpeg::except(avcodec_send_packet(codec_ctx_, &packet));
-
-                // if decoder signals EOF, decoder has been flushed
-                } else if (err == AVERROR_EOF) {
-                    break;
-
-                // else check for error
-                } else if (err < 0) {
-                    throw exception(err);
-
-                // if no error: we got a frame
-                } else {
-                    got_frame = true;
-                }
+            int err = av_read_frame(format_ctx_, &packet);
+            if (err == AVERROR_EOF) {
+                packet.size = 0;        // explicitly flush decoder
+                packet.data = nullptr;
+            } else {
+                ffmpeg::except(err);
             }
 
-            // successfully received frame: convert it
-            if (got_frame) {
-                auto new_input_format = make_stream_format(*frame_);
+            // NOTE: this should not return AVERROR(EAGAIN) since we are draining the decoder as much as possible
+            ffmpeg::except(avcodec_send_packet(codec_ctx_, &packet));
 
-                // re-create resample-context if input format has changed
-                if (input_format_ != new_input_format) {
-                    swr_ctx_ = swr_alloc_set_opts(swr_ctx_,
-                            output_format_.channel_layout, output_format_.sample_format, output_format_.sample_rate,
-                            new_input_format.channel_layout, new_input_format.sample_format, new_input_format.sample_rate,
-                            0, nullptr);
+        // if decoder signals EOF, decoder has been flushed, try to flush converter now
+        } else if (err == AVERROR_EOF) {
+            int len = swr_convert(swr_ctx_, &buffer, samples - read, nullptr, 0);
+            if (len > 0) {
+                read   += len;
+                buffer += len * output_sample_size;
+            } else if (len == 0 || len == AVERROR_EOF) {
+                eof_ = true;
+            } else throw exception(len);
 
-                    except(swr_init(swr_ctx_));
-                    input_format_ = new_input_format;
-                }
+        // else check for error
+        } else if (err < 0) {
+            throw exception(err);
 
-                auto in_ptr = const_cast<const uint8_t**>(frame_->extended_data);
+        // if no error: we got a frame, convert it
+        } else {
+            auto new_input_format = make_stream_format(*frame_);
 
-                // if dst-buffer has enough space, copy directly
-                auto out_samples = swr_get_out_samples(swr_ctx_, frame_->nb_samples);
-                if (out_samples <= samples - read) {
-                    int len = except(swr_convert(swr_ctx_, &buffer, samples - read, in_ptr, frame_->nb_samples));
-                    read   += len;
-                    buffer += len * output_frame_size;
+            // re-create resample-context if input format has changed
+            if (input_format_ != new_input_format) {
+                swr_ctx_ = swr_alloc_set_opts(swr_ctx_,
+                        output_format_.channel_layout, output_format_.sample_format, output_format_.sample_rate,
+                        new_input_format.channel_layout, new_input_format.sample_format, new_input_format.sample_rate,
+                        0, nullptr);
 
-                // else copy to intermediate-buffer
-                } else {
-                    buffer_offset_ = 0;
-                    buffer_.resize(out_samples * output_frame_size);
-                    auto out_ptr = buffer_.data();
-                    int len = except(swr_convert(swr_ctx_, &out_ptr, out_samples, in_ptr, frame_->nb_samples));
-                    buffer_.resize(len * output_frame_size);
-                }
+                except(swr_init(swr_ctx_));
+                input_format_ = new_input_format;
+            }
 
+            auto in_ptr = const_cast<const uint8_t**>(frame_->extended_data);
 
-            // EOF on decoder, flush converter
+            // if dst-buffer has enough space, copy directly
+            auto out_samples = swr_get_out_samples(swr_ctx_, frame_->nb_samples);
+            if (out_samples <= samples - read) {
+                int const len = except(swr_convert(swr_ctx_, &buffer, samples - read, in_ptr, frame_->nb_samples));
+                read   += len;
+                buffer += len * output_sample_size;
+
+            // else copy to intermediate-buffer, return as much as possible
             } else {
-                int len = swr_convert(swr_ctx_, &buffer, samples - read, nullptr, 0);
-                if (len > 0) {
-                    read   += len;
-                    buffer += len * output_frame_size;
-                } else if (len == 0 || len == AVERROR_EOF) {
-                    eof_ = true;
-                } else throw exception(len);
+                // convert and store in intermediate buffer
+                buffer_.resize(out_samples * output_sample_size);
+                auto out_ptr = buffer_.data();
+                int const len = except(swr_convert(swr_ctx_, &out_ptr, out_samples, in_ptr, frame_->nb_samples));
+                buffer_.resize(len * output_sample_size);
+
+                // (partial) copy to output-buffer
+                int const num_transfer_samples = std::min(len, samples - read);
+                auto const num_transfer_bytes = num_transfer_samples * output_sample_size;
+
+                std::copy(buffer_.begin(), buffer_.begin() + num_transfer_bytes, buffer);
+
+                read   += num_transfer_samples;
+                buffer += num_transfer_bytes;
+
+                buffer_offset_ = num_transfer_bytes;
             }
         }
     }
