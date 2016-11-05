@@ -5,8 +5,10 @@ project(avis)
 #dependencies
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/modules/")
 
-find_package(Vulkan REQUIRED)
-find_package(GLFW REQUIRED)
+find_package(Vulkan    REQUIRED)
+find_package(GLFW      REQUIRED)
+find_package(PortAudio REQUIRED)
+find_package(FFMPEG    REQUIRED)
 find_program(EXEC_GLSLANG glslangValidator)
 
 
@@ -22,7 +24,13 @@ endfunction()
 
 
 # base sources
-include_directories(src include ${VULKAN_INCLUDE_DIRS} ${GLFW_INCLUDE_DIRS})
+include_directories(
+    src include
+    ${VULKAN_INCLUDE_DIRS}
+    ${GLFW_INCLUDE_DIRS}
+    ${PORTAUDIO_INCLUDE_DIRS}
+    ${FFMPEG_INCLUDE_DIRS}
+)
 
 aux_source_directory(src/avis            SRC_AVIS)
 aux_source_directory(src/avis/glfw       SRC_AVIS_GLFW)
@@ -40,8 +48,15 @@ set(INC_AVIS_ALL ${INC_AVIS} ${INC_AVIS_UTILS} ${INC_AVIS_VULKAN} ${INC_AVIS_GLF
 # main app
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/resources")
 
-compile_spirv_shader("${CMAKE_CURRENT_SOURCE_DIR}/resources/avis/ringbuffer.vert" "${CMAKE_CURRENT_BINARY_DIR}/resources/ringbuffer.vert.spv")
-compile_spirv_shader("${CMAKE_CURRENT_SOURCE_DIR}/resources/avis/ringbuffer.frag" "${CMAKE_CURRENT_BINARY_DIR}/resources/ringbuffer.frag.spv")
+compile_spirv_shader(
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/avis/ringbuffer.vert"
+    "${CMAKE_CURRENT_BINARY_DIR}/resources/ringbuffer.vert.spv"
+)
+
+compile_spirv_shader(
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/avis/ringbuffer.frag"
+    "${CMAKE_CURRENT_BINARY_DIR}/resources/ringbuffer.frag.spv"
+)
 
 add_custom_target(shaders DEPENDS
     "${CMAKE_CURRENT_BINARY_DIR}/resources/ringbuffer.vert.spv"
@@ -56,4 +71,4 @@ add_dependencies(main shaders)
 
 # audio-playback example
 add_executable(audio "examples/audio/main.cpp")
-target_link_libraries(audio avformat avcodec avutil swresample portaudio asound jack)
+target_link_libraries(audio ${FFMPEG_LIBRARIES} ${PORTAUDIO_LIBRARIES})
