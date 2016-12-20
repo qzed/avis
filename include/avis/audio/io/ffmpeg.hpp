@@ -1,3 +1,5 @@
+#pragma once
+
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
@@ -67,8 +69,8 @@ inline auto to_string(int errc) -> std::string {
 namespace detail {
 
 class ffmpeg_error_category : public std::error_category {
-    virtual const char* name()                 const noexcept override;
-    virtual std::string message(int condition) const noexcept override;
+    inline virtual const char* name()                 const noexcept override;
+    inline virtual std::string message(int condition) const noexcept override;
 };
 
 auto ffmpeg_error_category::name() const noexcept -> const char* {
@@ -191,7 +193,7 @@ struct stream_format {
     inline auto operator!= (stream_format const& rhs) -> bool;
 };
 
-auto make_stream_format(AVFrame const& frame) -> stream_format {
+inline auto make_stream_format(AVFrame const& frame) -> stream_format {
     int channels = av_frame_get_channels(&frame);
     std::int64_t channel_layout = av_frame_get_channel_layout(&frame);
 
@@ -219,14 +221,14 @@ auto stream_format::operator!= (stream_format const& rhs) -> bool {
     return !(*this == rhs);
 }
 
-auto get_pcm_sample_size(stream_format const& fmt) -> int {
+inline auto get_pcm_sample_size(stream_format const& fmt) -> int {
     return except(av_samples_get_buffer_size(nullptr, fmt.channels, 1, fmt.sample_format, 1));
 }
 
 
 class audio_input_stream {
 public:
-    static auto open_default(stream_format const& format, std::string const& filename) -> audio_input_stream;
+    static inline auto open_default(stream_format const& format, std::string const& filename) -> audio_input_stream;
 
     audio_input_stream()
             : output_format_{}
@@ -270,8 +272,8 @@ public:
     ~audio_input_stream() { close(); }
 
 
-    auto operator= (audio_input_stream const& rhs) -> audio_input_stream& = delete;
-    auto operator= (audio_input_stream&& rhs)      -> audio_input_stream&;
+    inline auto operator= (audio_input_stream const& rhs) -> audio_input_stream& = delete;
+    inline auto operator= (audio_input_stream&& rhs)      -> audio_input_stream&;
 
     inline void close();
 

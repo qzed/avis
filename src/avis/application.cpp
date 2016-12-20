@@ -2,13 +2,44 @@
 
 #include <avis/utils/fileio.hpp>
 
+
 #include <iostream>
 #include <algorithm>
 #include <random>
 #include <chrono>
+#include <thread>
 
+
+using namespace std::literals::chrono_literals;
 
 namespace avis {
+
+void application::play(std::string const& file, audio::ffmpeg::stream_format const& fmt) {
+    // setup audio fields
+    audio_out_sample_size_ = audio::ffmpeg::get_pcm_sample_size(fmt);
+
+    int64_t qsize = 1L * fmt.channels * fmt.sample_rate * 32 / 8;   // store 1 second with 32bit precision
+    audio_queue_ = std::make_unique<boost::lockfree::spsc_queue<uint8_t>>(qsize);
+
+    int64_t rdbsize = audio_out_sample_size_ * 1024 * 64L;
+    audio_rdbuf_ = std::vector<uint8_t>(rdbsize);
+
+    audio_eof_ = false;
+    audio_flushed_ = false;
+
+    // set up streams
+    auto const pa_fmt = audio::portaudio::make_stream_format(fmt);
+    audio_out_ = audio::portaudio::output_stream::open_default(pa_fmt, 256, [this](auto... p) {
+        return this->cb_audio(p...);}
+    );
+    audio_in_ = audio::ffmpeg::audio_input_stream::open_default(fmt, file);
+
+    paused_ = false;
+    audio_out_.start();
+    application_base::run();
+    audio_out_.stop();
+}
+
 
 void application::cb_create() {
     setup_shader_modules();
@@ -742,6 +773,54 @@ void application::cb_display() {
     using clock = std::chrono::high_resolution_clock;
     auto const start_frame = clock::now();
 
+    frame_update();
+    frame_draw();
+
+    auto const delta_frame = clock::now() - start_frame;
+    std::cout << "frame-time: " << std::chrono::duration_cast<std::chrono::microseconds>(delta_frame).count()
+            << u8"µs\n";
+}
+
+int application::cb_audio(void* outbuf, unsigned long framecount, PaStreamCallbackTimeInfo const* time, unsigned long flags) {
+        uint8_t* out = reinterpret_cast<uint8_t*>(outbuf);
+        unsigned long len_bytes = framecount * audio_out_sample_size_;
+
+        if (!paused_) {
+            unsigned long count = audio_queue_->pop(out, len_bytes);
+            std::fill(out + count, out + len_bytes, 0);
+
+            if (count < len_bytes && audio_eof_)
+                return paComplete;
+        } else {
+            std::fill(out, out + len_bytes, 0);
+        }
+
+        return paContinue;
+}
+
+void application::frame_update() {
+    if (paused_) return;
+
+    int64_t available = audio_queue_->write_available();
+    int64_t written = 0;
+
+    while (written < available && !audio_in_.eof()) {
+        int64_t requested = std::min(static_cast<int64_t>(audio_rdbuf_.capacity()), available - written) / audio_out_sample_size_;
+        int64_t len_samples = audio_in_.read(audio_rdbuf_.data(), requested);
+        int64_t len_bytes = len_samples * audio_out_sample_size_;
+
+        int64_t pushed = 0;
+        while (pushed != len_bytes)
+            pushed += audio_queue_->push(audio_rdbuf_.data() + pushed, len_bytes - pushed);
+
+        written += pushed;
+    }
+
+    if (audio_in_.eof())
+        audio_eof_ = true;
+}
+
+void application::frame_draw() {
     // update texture-image
     if (!paused_) {
         auto const device = get_device().get_handle();
@@ -834,10 +913,6 @@ void application::cb_display() {
     present_info.pResults           = nullptr;
 
     vulkan::except(get_device().get_present_queue().present_khr(present_info));
-
-    auto const delta_frame = clock::now() - start_frame;
-    std::cout << "frame-time: " << std::chrono::duration_cast<std::chrono::microseconds>(delta_frame).count()
-            << u8"µs\n";
 }
 
 void application::cb_resize(unsigned int width, unsigned int height) noexcept {

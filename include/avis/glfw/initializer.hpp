@@ -8,8 +8,8 @@ namespace glfw {
 
 class scope_initializer {
 public:
-  scope_initializer();
-  ~scope_initializer();
+  inline scope_initializer();
+  inline ~scope_initializer();
 };
 
 scope_initializer::scope_initializer() { glfwInit(); }

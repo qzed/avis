@@ -6,7 +6,9 @@
 #include <avis/vulkan/command_buffers.hpp>
 #include <avis/vulkan/screenquad.hpp>
 #include <avis/vulkan/handles.hpp>
+#include <avis/audio/io.hpp>
 
+#include <boost/lockfree/spsc_queue.hpp>
 
 #include <array>
 
@@ -21,14 +23,20 @@ class application final : private application_base {
 public:
     application(application_info const& appinfo)
             : application_base(appinfo)
-            , paused_{false}
+            , paused_{true}
             , texture_offset_{0} {}
 
     using application_base::create;
     using application_base::destroy;
-    using application_base::run;
+
+    void play(std::string const& file, audio::ffmpeg::stream_format const& fmt = {2, AV_CH_LAYOUT_STEREO, AV_SAMPLE_FMT_FLT, 192000});
 
 private:
+    void frame_update();
+    void frame_draw();
+
+    int cb_audio(void* outbuf, unsigned long framecount, PaStreamCallbackTimeInfo const* time, unsigned long flags);
+
     void cb_create() override;
     void cb_destroy() override;
     void cb_display() override;
@@ -53,8 +61,8 @@ private:
     void setup_transfer_cmdbuffer(std::int32_t offset, std::uint32_t len);
 
 private:
-    bool         paused_;
-    std::int32_t texture_offset_;
+    std::atomic_bool paused_;
+    std::int32_t     texture_offset_;
 
     vulkan::shader_module            vert_shader_module_;
     vulkan::shader_module            frag_shader_module_;
@@ -80,6 +88,14 @@ private:
     vulkan::semaphore                sem_img_available_;
     vulkan::semaphore                sem_img_finished_;
     vulkan::fence                    staging_fence_;
+
+    audio::ffmpeg::audio_input_stream audio_in_;
+    audio::portaudio::output_stream   audio_out_;
+    int                               audio_out_sample_size_;
+    std::vector<uint8_t>              audio_rdbuf_;
+    std::unique_ptr<boost::lockfree::spsc_queue<std::uint8_t>> audio_queue_;
+    std::atomic_bool                  audio_eof_;
+    std::atomic_bool                  audio_flushed_;
 };
 
 } /* namespace avis */

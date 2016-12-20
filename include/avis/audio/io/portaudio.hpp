@@ -1,3 +1,5 @@
+#pragma once
+
 #include <portaudio.h>
 
 #include <system_error>
@@ -53,8 +55,8 @@ inline auto to_string(PaError errc) -> std::string {
 namespace detail {
 
 class portaudio_error_category : public std::error_category {
-    virtual const char* name()                 const noexcept override;
-    virtual std::string message(int condition) const noexcept override;
+    inline virtual const char* name()                 const noexcept override;
+    inline virtual std::string message(int condition) const noexcept override;
 };
 
 auto portaudio_error_category::name() const noexcept -> const char* {
@@ -100,8 +102,8 @@ constexpr auto except(PaError errc) -> int {
 
 class scope_initializer {
 public:
-    scope_initializer();
-    ~scope_initializer();
+    inline scope_initializer();
+    inline ~scope_initializer();
 };
 
 scope_initializer::scope_initializer()  { except(Pa_Initialize()); }

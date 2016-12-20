@@ -4,8 +4,15 @@
 #include <iostream>
 
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc != 2) {
+        std::cout << "Usage: " << argv[0] << " <filename>\n";
+        return 1;
+    }
+
     avis::glfw::scope_initializer glfw_initializer;
+    auto init_pa = avis::audio::portaudio::scope_initializer();
+    av_register_all();
 
     avis::application_info appinfo = {};
     appinfo.app_name                   = "avis-vk";
@@ -29,5 +36,5 @@ int main() {
 
     avis::application app{appinfo};
     app.create();
-    app.run();
+    app.play(argv[1]);
 }

@@ -1,3 +1,5 @@
+#pragma once
+
 #include <avis/audio/io/portaudio.hpp>
 #include <avis/audio/io/ffmpeg.hpp>
 
