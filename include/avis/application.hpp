@@ -9,13 +9,18 @@
 #include <avis/audio/io.hpp>
 
 #include <boost/lockfree/spsc_queue.hpp>
+#include <boost/circular_buffer.hpp>
 
 #include <array>
 
 
 namespace avis {
 
-constexpr auto texture_extent = VkExtent3D{4096, 1024, 1};
+constexpr auto audio_out_fmt  = audio::ffmpeg::stream_format{2, AV_CH_LAYOUT_STEREO, AV_SAMPLE_FMT_FLT, 192000};
+constexpr auto chunk_size     = 4096;
+constexpr auto chunks         = 1024;
+
+constexpr auto texture_extent = VkExtent3D{chunk_size, chunks, 1};
 constexpr auto texture_bytes  = texture_extent.width * texture_extent.height * texture_extent.depth * 4;
 
 
@@ -29,7 +34,7 @@ public:
     using application_base::create;
     using application_base::destroy;
 
-    void play(std::string const& file, audio::ffmpeg::stream_format const& fmt = {2, AV_CH_LAYOUT_STEREO, AV_SAMPLE_FMT_FLT, 192000});
+    void play(std::string const& file);
 
 private:
     void frame_update();
@@ -58,7 +63,7 @@ private:
     void setup_command_buffers();
     void setup_semaphores();
 
-    void setup_transfer_cmdbuffer(std::int32_t offset, std::uint32_t len);
+    void setup_transfer_cmdbuffer(std::vector<std::tuple<std::int32_t, std::uint32_t>> range);
 
 private:
     std::atomic_bool paused_;
@@ -91,11 +96,12 @@ private:
 
     audio::ffmpeg::audio_input_stream audio_in_;
     audio::portaudio::output_stream   audio_out_;
-    int                               audio_out_sample_size_;
-    std::vector<uint8_t>              audio_rdbuf_;
+    std::int64_t                      audio_out_sample_size_;
+    std::vector<std::uint8_t>         audio_rdbuf_;
     std::unique_ptr<boost::lockfree::spsc_queue<std::uint8_t>> audio_queue_;
+    boost::circular_buffer<float>     audio_imgbuf_;
     std::atomic_bool                  audio_eof_;
-    std::atomic_bool                  audio_flushed_;
+    std::atomic_long                  audio_framecounter_;
 };
 
 } /* namespace avis */

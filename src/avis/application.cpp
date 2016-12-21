@@ -14,25 +14,26 @@ using namespace std::literals::chrono_literals;
 
 namespace avis {
 
-void application::play(std::string const& file, audio::ffmpeg::stream_format const& fmt) {
+void application::play(std::string const& file) {
     // setup audio fields
-    audio_out_sample_size_ = audio::ffmpeg::get_pcm_sample_size(fmt);
+    audio_out_sample_size_ = audio::ffmpeg::get_pcm_sample_size(audio_out_fmt);
 
-    int64_t qsize = 1L * fmt.channels * fmt.sample_rate * 32 / 8;   // store 1 second with 32bit precision
-    audio_queue_ = std::make_unique<boost::lockfree::spsc_queue<uint8_t>>(qsize);
+    int64_t qsize = 1L * audio_out_fmt.sample_rate * 32 / 8;   // store 1 second with 32bit precision
+    audio_queue_ = std::make_unique<boost::lockfree::spsc_queue<uint8_t>>(qsize * audio_out_fmt.channels);
+    audio_imgbuf_ = boost::circular_buffer<float>(qsize * 2 / 4);
 
     int64_t rdbsize = audio_out_sample_size_ * 1024 * 64L;
     audio_rdbuf_ = std::vector<uint8_t>(rdbsize);
 
     audio_eof_ = false;
-    audio_flushed_ = false;
+    audio_framecounter_ = 0;
 
     // set up streams
-    auto const pa_fmt = audio::portaudio::make_stream_format(fmt);
+    auto const pa_fmt = audio::portaudio::make_stream_format(audio_out_fmt);
     audio_out_ = audio::portaudio::output_stream::open_default(pa_fmt, 256, [this](auto... p) {
         return this->cb_audio(p...);}
     );
-    audio_in_ = audio::ffmpeg::audio_input_stream::open_default(fmt, file);
+    audio_in_ = audio::ffmpeg::audio_input_stream::open_default(audio_out_fmt, file);
 
     paused_ = false;
     audio_out_.start();
@@ -483,12 +484,12 @@ void application::setup_texture() {
     // create sampler
     auto sampler_info = VkSamplerCreateInfo{};
     sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampler_info.magFilter               = VK_FILTER_LINEAR;
-    sampler_info.minFilter               = VK_FILTER_LINEAR;
+    sampler_info.magFilter               = VK_FILTER_NEAREST;
+    sampler_info.minFilter               = VK_FILTER_NEAREST;
     sampler_info.addressModeU            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler_info.addressModeV            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler_info.addressModeW            = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_info.anisotropyEnable        = true;
+    sampler_info.anisotropyEnable        = false;
     sampler_info.maxAnisotropy           = 16;
     sampler_info.borderColor             = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
     sampler_info.unnormalizedCoordinates = true;
@@ -564,7 +565,7 @@ void application::setup_uniform_buffer() {
     uniform_buffer_         = std::move(buffer);
 }
 
-void application::setup_transfer_cmdbuffer(std::int32_t offset, std::uint32_t len) {
+void application::setup_transfer_cmdbuffer(std::vector<std::tuple<std::int32_t, std::uint32_t>> range) {
     // create transfer command buffer
     auto alloc_info = VkCommandBufferAllocateInfo{};
     alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -582,60 +583,64 @@ void application::setup_transfer_cmdbuffer(std::int32_t offset, std::uint32_t le
 
     vulkan::except(vkBeginCommandBuffer(command_buffer.get_handle(), &begin_info));
 
-    // transition image to transfer-src layout
-    auto img_barrier_start = VkImageMemoryBarrier{};
-    img_barrier_start.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    img_barrier_start.oldLayout           = VK_IMAGE_LAYOUT_GENERAL;
-    img_barrier_start.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    img_barrier_start.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    img_barrier_start.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    img_barrier_start.image               = texture_staging_image_.get_handle();
-    img_barrier_start.srcAccessMask       = VK_ACCESS_HOST_WRITE_BIT;
-    img_barrier_start.dstAccessMask       = VK_ACCESS_TRANSFER_READ_BIT;
+    if (!range.empty()) {
+        // transition image to transfer-src layout
+        auto img_barrier_start = VkImageMemoryBarrier{};
+        img_barrier_start.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        img_barrier_start.oldLayout           = VK_IMAGE_LAYOUT_GENERAL;
+        img_barrier_start.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        img_barrier_start.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        img_barrier_start.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        img_barrier_start.image               = texture_staging_image_.get_handle();
+        img_barrier_start.srcAccessMask       = VK_ACCESS_HOST_WRITE_BIT;
+        img_barrier_start.dstAccessMask       = VK_ACCESS_TRANSFER_READ_BIT;
 
-    img_barrier_start.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-    img_barrier_start.subresourceRange.baseMipLevel   = 0;
-    img_barrier_start.subresourceRange.levelCount     = 1;
-    img_barrier_start.subresourceRange.baseArrayLayer = 0;
-    img_barrier_start.subresourceRange.layerCount     = 1;
+        img_barrier_start.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        img_barrier_start.subresourceRange.baseMipLevel   = 0;
+        img_barrier_start.subresourceRange.levelCount     = 1;
+        img_barrier_start.subresourceRange.baseArrayLayer = 0;
+        img_barrier_start.subresourceRange.layerCount     = 1;
 
-    vkCmdPipelineBarrier(command_buffer.get_handle(), VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
-            0, nullptr, 0, nullptr, 1, &img_barrier_start);
+        vkCmdPipelineBarrier(command_buffer.get_handle(), VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+                0, nullptr, 0, nullptr, 1, &img_barrier_start);
 
-    auto img_copy = VkImageCopy{};
-    img_copy.srcOffset      = {0, offset, 0};
-    img_copy.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    img_copy.dstOffset      = {0, offset, 0};
-    img_copy.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    img_copy.extent         = {texture_extent.width, len, 1};
-    vkCmdCopyImage(command_buffer.get_handle(), texture_staging_image_.get_handle(),
-            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture_image_.get_handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            1, &img_copy);
+        auto img_copy = std::vector<VkImageCopy>(range.size());
+        for (int i = 0; i < range.size(); i++) {
+            img_copy[i].srcOffset      = {0, std::get<0>(range[i]), 0};
+            img_copy[i].srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            img_copy[i].dstOffset      = {0, std::get<0>(range[i]), 0};
+            img_copy[i].dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            img_copy[i].extent         = {texture_extent.width, std::get<1>(range[i]), 1};
+        }
+        vkCmdCopyImage(command_buffer.get_handle(), texture_staging_image_.get_handle(),
+                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture_image_.get_handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                img_copy.size(), img_copy.data());
 
-    auto img_barrier_stop = VkImageMemoryBarrier{};
-    img_barrier_stop.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    img_barrier_stop.oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    img_barrier_stop.newLayout           = VK_IMAGE_LAYOUT_GENERAL;
-    img_barrier_stop.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    img_barrier_stop.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    img_barrier_stop.image               = texture_staging_image_.get_handle();
-    img_barrier_stop.srcAccessMask       = VK_ACCESS_TRANSFER_READ_BIT;
-    img_barrier_stop.dstAccessMask       = VK_ACCESS_HOST_WRITE_BIT;
+        auto img_barrier_stop = VkImageMemoryBarrier{};
+        img_barrier_stop.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        img_barrier_stop.oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        img_barrier_stop.newLayout           = VK_IMAGE_LAYOUT_GENERAL;
+        img_barrier_stop.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        img_barrier_stop.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        img_barrier_stop.image               = texture_staging_image_.get_handle();
+        img_barrier_stop.srcAccessMask       = VK_ACCESS_TRANSFER_READ_BIT;
+        img_barrier_stop.dstAccessMask       = VK_ACCESS_HOST_WRITE_BIT;
 
-    img_barrier_stop.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-    img_barrier_stop.subresourceRange.baseMipLevel   = 0;
-    img_barrier_stop.subresourceRange.levelCount     = 1;
-    img_barrier_stop.subresourceRange.baseArrayLayer = 0;
-    img_barrier_stop.subresourceRange.layerCount     = 1;
+        img_barrier_stop.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        img_barrier_stop.subresourceRange.baseMipLevel   = 0;
+        img_barrier_stop.subresourceRange.levelCount     = 1;
+        img_barrier_stop.subresourceRange.baseArrayLayer = 0;
+        img_barrier_stop.subresourceRange.layerCount     = 1;
 
-    vkCmdPipelineBarrier(command_buffer.get_handle(), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0,
-            0, nullptr, 0, nullptr, 1, &img_barrier_stop);
+        vkCmdPipelineBarrier(command_buffer.get_handle(), VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0,
+                0, nullptr, 0, nullptr, 1, &img_barrier_stop);
 
-    auto buf_copy = VkBufferCopy{};
-    buf_copy.srcOffset = 0;
-    buf_copy.dstOffset = 0;
-    buf_copy.size = sizeof(std::int32_t);
-    vkCmdCopyBuffer(command_buffer.get_handle(), uniform_staging_buffer_.get_handle(), uniform_buffer_.get_handle(), 1, &buf_copy);
+        auto buf_copy = VkBufferCopy{};
+        buf_copy.srcOffset = 0;
+        buf_copy.dstOffset = 0;
+        buf_copy.size = sizeof(std::int32_t);
+        vkCmdCopyBuffer(command_buffer.get_handle(), uniform_staging_buffer_.get_handle(), uniform_buffer_.get_handle(), 1, &buf_copy);
+    }
 
     vulkan::except(vkEndCommandBuffer(command_buffer.get_handle()));
 
@@ -782,21 +787,24 @@ void application::cb_display() {
 }
 
 int application::cb_audio(void* outbuf, unsigned long framecount, PaStreamCallbackTimeInfo const* time, unsigned long flags) {
-        uint8_t* out = reinterpret_cast<uint8_t*>(outbuf);
-        unsigned long len_bytes = framecount * audio_out_sample_size_;
+    auto out = reinterpret_cast<uint8_t*>(outbuf);
+    auto len_bytes = framecount * audio_out_sample_size_;
 
-        if (!paused_) {
-            unsigned long count = audio_queue_->pop(out, len_bytes);
-            std::fill(out + count, out + len_bytes, 0);
+    if (!paused_) {
+        auto count = audio_queue_->pop(out, len_bytes);
+        std::fill(out + count, out + len_bytes, 0);
 
-            if (count < len_bytes && audio_eof_)
-                return paComplete;
-        } else {
-            std::fill(out, out + len_bytes, 0);
-        }
+        audio_framecounter_ += count / audio_out_sample_size_;
 
-        return paContinue;
+        if (count < len_bytes && audio_eof_)
+            return paComplete;
+    } else {
+        std::fill(out, out + len_bytes, 0);
+    }
+
+    return paContinue;
 }
+
 
 void application::frame_update() {
     if (paused_) return;
@@ -809,9 +817,14 @@ void application::frame_update() {
         int64_t len_samples = audio_in_.read(audio_rdbuf_.data(), requested);
         int64_t len_bytes = len_samples * audio_out_sample_size_;
 
+        // write to audio queue
         int64_t pushed = 0;
         while (pushed != len_bytes)
             pushed += audio_queue_->push(audio_rdbuf_.data() + pushed, len_bytes - pushed);
+
+        // write single channel to image buffer
+        for (int64_t i = 0; i < len_samples * audio_out_fmt.channels; i+= audio_out_fmt.channels)
+            audio_imgbuf_.push_back(reinterpret_cast<float*>(audio_rdbuf_.data())[i]);
 
         written += pushed;
     }
@@ -830,34 +843,53 @@ void application::frame_draw() {
         vulkan::except(vkWaitForFences(device, 1, &fence, true, std::numeric_limits<std::uint64_t>::max()));
         vulkan::except(vkResetFences(device, 1, &fence));
 
+        int64_t new_chunks;
+        auto range = std::vector<std::tuple<std::int32_t, std::uint32_t>>();
+
+        new_chunks = audio_imgbuf_.size() / chunk_size;
+
+        if (new_chunks == 0) {
+            range = {};
+        } else if (texture_offset_ + new_chunks < chunks) {
+            range = {{texture_offset_, new_chunks}};
+        } else {
+            range = {
+                {texture_offset_, chunks - texture_offset_},
+                {0, texture_offset_ + new_chunks - chunks}
+            };
+        }
+
         // update texture image
-        {
-            auto const chunk_size   = texture_extent.width;
-            auto const chunk_bytes  = chunk_size * 4;
-            auto const offset_bytes = texture_offset_ * chunk_bytes;
+        auto const chunk_bytes = chunk_size * 4;
+        for (auto const& r : range) {
+            auto const num_chunks   = std::get<1>(r);
+            auto const offset_bytes = std::get<0>(r) * chunk_bytes;
+            auto const len_bytes    = num_chunks * chunk_bytes;
 
-            void* data = texture_staging_image_.map_memory(device, offset_bytes, chunk_bytes, 0).move_or_throw();
+            void* data = texture_staging_image_.map_memory(device, offset_bytes, len_bytes, 0).move_or_throw();
 
-            auto rnd_gen  = std::mt19937{std::random_device{}()};
-            auto rnd_dist = std::uniform_real_distribution<float>{0.f, 1.f};
-            std::generate(static_cast<float*>(data), static_cast<float*>(data) + chunk_size, [&](){
-                return rnd_dist(rnd_gen);
-            });
+            for (int i = 0; i < num_chunks; i++) {
+                auto const begin = audio_imgbuf_.begin() + chunk_size * i;
+                auto const end   = audio_imgbuf_.begin() + chunk_size * (i + 1);
+                auto const dst   = static_cast<float*>(data) + chunk_size * i;
 
-            texture_staging_image_.unmap_memory(get_device().get_handle());
+                std::copy(begin, end, dst);
+            }
+
+            audio_imgbuf_.erase_begin(chunk_size * num_chunks);
+            texture_staging_image_.unmap_memory(device);
         }
 
         // update uniform buffer
-        {
+        if (new_chunks > 0) {
             void* data = uniform_staging_buffer_.map_memory(device, 0, sizeof(std::int32_t), 0).move_or_throw();
-            *static_cast<std::int32_t*>(data) = texture_offset_ + 1;
+            *static_cast<std::int32_t*>(data) = texture_offset_ + new_chunks;
             uniform_staging_buffer_.unmap_memory(device);
         }
 
         // transfer staging to device-local
         {
-            setup_transfer_cmdbuffer(texture_offset_, 1);
-            // TODO: extract image-transfer to oneshot command buffer with dynamic range image-copy cmd
+            setup_transfer_cmdbuffer(range);
 
             auto command_buffer = transfer_cmdbuffer_.get_handle();
 
@@ -869,7 +901,7 @@ void application::frame_draw() {
             vulkan::except(get_device().get_graphics_queue().submit(1, &submit_info, fence));
         }
 
-        texture_offset_++;
+        texture_offset_ += new_chunks;
         if (texture_offset_ >= texture_extent.height)
             texture_offset_ -= texture_extent.height;
     }
