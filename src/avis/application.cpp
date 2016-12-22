@@ -875,13 +875,10 @@ void application::frame_draw() {
             void* data = texture_staging_image_.map_memory(device, offset_bytes, len_bytes, 0).move_or_throw();
 
             for (int i = 0; i < num_chunks; i++) {
-                auto const begin = audio_imgbuf_.begin() + chunk_size * i;
-                auto const end   = audio_imgbuf_.begin() + chunk_size * (i + 1);
-                auto const dst   = static_cast<float*>(data) + chunk_size * i;
+                auto const src = audio_imgbuf_.begin() + chunk_size * i;
+                auto const dst = static_cast<float*>(data) + chunk_size * i;
 
-                std::copy(begin, end, dst);
-
-                audio::rfft<chunk_size>(dst, dst);
+                audio::rfft<chunk_size>(src, dst);
             }
 
             audio_imgbuf_.erase_begin(chunk_size * num_chunks);

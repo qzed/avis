@@ -80,8 +80,10 @@ constexpr auto fft_root_table() -> std::array<std::complex<real_t>, N/2> {
 }
 
 
-template<std::size_t N, class real_t>
-void rfft(real_t* data, real_t* dst) {
+template<std::size_t N, class InputIterator, class OutputIterator, class real_t = typename std::iterator_traits<InputIterator>::value_type>
+void rfft(InputIterator src, OutputIterator dst) {
+    static_assert(bitcount(N) == 1, "This FFT implementation requires N to be a power of two!");
+
     constexpr static auto lut_shuffle = io_shuffle_table<N>();
     constexpr static auto lut_window  = hanning_window_table<N, real_t>();
     constexpr static auto lut_roots   = fft_root_table<N, real_t>();
@@ -91,7 +93,7 @@ void rfft(real_t* data, real_t* dst) {
     // convert real-data to complex data and shuffle
     auto buffer = std::array<std::complex<real_t>, N>();
     for (std::size_t i = 0; i < N; i++)
-        buffer[lut_shuffle[i]] = {data[i] * lut_window[i]};
+        buffer[lut_shuffle[i]] = {*(src++) * lut_window[i]};
 
     // perform fft
     for (std::uint64_t groups = N/2; groups > 0; groups >>=1) {
@@ -112,7 +114,7 @@ void rfft(real_t* data, real_t* dst) {
 
     // calculate magnitude
     for (std::size_t i = 0; i < N; i++)
-        dst[i] = std::abs(buffer[i]) * scale;
+        *(dst++) = std::abs(buffer[i]) * scale;
 }
 
 
