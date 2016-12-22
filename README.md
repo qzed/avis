@@ -1,7 +1,10 @@
 # Audio Spectrum Visualization using Vulkan
-Experimental Project.
+Experimental project.
 - Compile using CMake.
-- Execute using `./avis <path-to-audio-file>`.
+- Execute using `./avis <path-to-audio-file>`, use `<space>` to pause, `q` or `<esc>` to quit.
+
+Interesting features:
+- FFT: Unit-roots, shuffle-indices for the input, and the window-coefficients are computed at compile-time.
 
 ## Dependencies
 | Name                     | Link                                                           |
