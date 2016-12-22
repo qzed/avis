@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.0)
 project(avis)
 
 
+set (CMAKE_CXX_STANDARD 14)
+
 #dependencies
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/modules/")
 

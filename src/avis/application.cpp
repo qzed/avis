@@ -1,6 +1,7 @@
 #include <avis/application.hpp>
 
 #include <avis/utils/fileio.hpp>
+#include <avis/audio/fft.hpp>
 
 
 #include <iostream>
@@ -874,6 +875,8 @@ void application::frame_draw() {
                 auto const dst   = static_cast<float*>(data) + chunk_size * i;
 
                 std::copy(begin, end, dst);
+
+                audio::rfft<chunk_size>(dst, dst);
             }
 
             audio_imgbuf_.erase_begin(chunk_size * num_chunks);
