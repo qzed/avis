@@ -1,13 +1,10 @@
 # Audio Spectrum Visualization using Vulkan
-Experimental Project.
+Experimental Project. Compile using CMake.
 
 ## Dependencies
 | Name                     | Link                                                           |
 |--------------------------|----------------------------------------------------------------|
 | GLFW                     | http://www.glfw.org/                                           |
 | glslang/glslangValidator | https://www.khronos.org/opengles/sdk/tools/Reference-Compiler/ |
-
-## TODO
-- ringbuffer-based visualization
-- audio subsystem
-- proper `CMakeLists.txt`
+| ffmpeg                   | https://ffmpeg.org/                                            |
+| PortAudio                | http://www.portaudio.com/                                      |
