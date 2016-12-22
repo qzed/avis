@@ -2,6 +2,7 @@
 
 #include <cinttypes>
 #include <cmath>
+#include <limits.h>
 
 
 namespace avis {
@@ -22,8 +23,10 @@ template <class real_t>
 constexpr auto pow(real_t x, int exp) -> real_t {
     if (exp == 0)
         return 1;
-    else
+    else if (exp > 0)
         return x * pow(x, exp - 1);
+    else
+        return x / pow(x, exp + 1);
 }
 
 template <class real_t>
@@ -75,9 +78,26 @@ constexpr auto cos(real_t x) -> real_t {
     return result;
 }
 
-template <class real_t>
-constexpr auto sqrt(real_t x) -> real_t {
-    return std::sqrt(x);    // TODO: make constexpr
+template <int N = 8, class real_t>
+constexpr auto sqrt(real_t s) -> real_t {
+    // calculate estimate (s = a * 2^(2n) => s ~ 2^n)
+    real_t x = 0;
+    {
+        real_t n = 0;
+        real_t a = abs(s);
+        if (a < 1)
+            for (; a < 1; a *= 4, n-=2) {}
+        else
+            for (; a > 1; a /= 4, n+=2) {}
+
+        x = pow(2, n);
+    }
+
+    // babylonian method
+    for (int i = 0; i < N; i++)
+        x = (x + s / x) / 2;
+
+    return x;
 }
 
 } /* namespace cxpr */
