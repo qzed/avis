@@ -137,6 +137,8 @@ public:
     inline bool is_active()  const;
     inline bool is_stopped() const;
 
+    inline auto get_time() const noexcept -> double;
+
     inline auto get_handle() const noexcept -> PaStream*;
 
 private:
@@ -171,6 +173,10 @@ bool stream_base::is_active() const {
 
 bool stream_base::is_stopped() const {
     return except(Pa_IsStreamStopped(stream_));
+}
+
+auto stream_base::get_time() const noexcept -> double {
+    return Pa_GetStreamTime(stream_);
 }
 
 auto stream_base::get_handle() const noexcept -> PaStream* {

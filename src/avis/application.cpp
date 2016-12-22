@@ -30,7 +30,8 @@ void application::play(std::string const& file) {
     audio_rdbuf_ = std::vector<uint8_t>(rdbsize);
 
     audio_eof_ = false;
-    audio_framecounter_ = 0;
+    audio_samples_written_   = 0;
+    audio_samples_displayed_ = 0;
 
     // set up streams
     auto const pa_fmt = audio::portaudio::make_stream_format(audio_out_fmt);
@@ -800,7 +801,7 @@ int application::cb_audio(void* outbuf, unsigned long framecount, PaStreamCallba
         auto count = audio_queue_->pop(out, len_bytes);
         std::fill(out + count, out + len_bytes, 0);
 
-        audio_framecounter_ += count / audio_out_sample_size_;
+        audio_samples_written_ += count / audio_out_sample_size_;
 
         if (count < len_bytes && audio_eof_)
             return paComplete;
@@ -849,10 +850,13 @@ void application::frame_draw() {
         vulkan::except(vkWaitForFences(device, 1, &fence, true, std::numeric_limits<std::uint64_t>::max()));
         vulkan::except(vkResetFences(device, 1, &fence));
 
-        int64_t new_chunks;
+        std::int64_t new_chunks;
         auto range = std::vector<std::tuple<std::int32_t, std::uint32_t>>();
 
-        new_chunks = audio_imgbuf_.size() / chunk_size;
+        // Note: this is a primitive synchronization, due to some issues with portaudio's Pa_GetStreamTime(...)
+        auto frames_to_display = audio_samples_written_ - audio_samples_displayed_;
+        new_chunks = std::min(frames_to_display, static_cast<std::int64_t>(audio_imgbuf_.size())) / chunk_size;
+        audio_samples_displayed_ += new_chunks * chunk_size;
 
         if (new_chunks == 0) {
             range = {};

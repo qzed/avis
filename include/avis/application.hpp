@@ -101,7 +101,8 @@ private:
     std::unique_ptr<boost::lockfree::spsc_queue<std::uint8_t>> audio_queue_;
     boost::circular_buffer<float>     audio_imgbuf_;
     std::atomic_bool                  audio_eof_;
-    std::atomic_long                  audio_framecounter_;
+    std::atomic<std::int64_t>         audio_samples_written_;
+    std::int64_t                      audio_samples_displayed_;
 };
 
 } /* namespace avis */
