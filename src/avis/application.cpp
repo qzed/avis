@@ -15,6 +15,9 @@ using namespace std::literals::chrono_literals;
 
 namespace avis {
 
+constexpr bool print_frame_time = false;
+
+
 void application::play(std::string const& file) {
     // setup audio fields
     audio_out_sample_size_ = audio::ffmpeg::get_pcm_sample_size(audio_out_fmt);
@@ -783,8 +786,10 @@ void application::cb_display() {
     frame_draw();
 
     auto const delta_frame = clock::now() - start_frame;
-    std::cout << "frame-time: " << std::chrono::duration_cast<std::chrono::microseconds>(delta_frame).count()
-            << u8"µs\n";
+    if (print_frame_time) {
+        std::cout << "frame-time: " << std::chrono::duration_cast<std::chrono::microseconds>(delta_frame).count()
+                << u8"µs\n";
+    }
 }
 
 int application::cb_audio(void* outbuf, unsigned long framecount, PaStreamCallbackTimeInfo const* time, unsigned long flags) {

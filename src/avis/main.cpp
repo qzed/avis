@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
     appinfo.vulkan_version             = VK_MAKE_VERSION(1, 0, 0);
     appinfo.vulkan_instance_extensions = {};
     appinfo.vulkan_device_extensions   = {};
-    appinfo.vulkan_validation_enable   = true;
+    appinfo.vulkan_validation_enable   = false;
     appinfo.vulkan_validation_layers   = { "VK_LAYER_LUNARG_standard_validation" };
     appinfo.vulkan_validation_filter   = VK_DEBUG_REPORT_ERROR_BIT_EXT
                                        | VK_DEBUG_REPORT_WARNING_BIT_EXT
