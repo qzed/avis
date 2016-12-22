@@ -65,6 +65,6 @@ add_custom_target(shaders DEPENDS
     "${CMAKE_CURRENT_BINARY_DIR}/resources/ringbuffer.frag.spv"
 )
 
-add_executable(main ${SRC_AVIS_ALL} ${INC_AVIS_ALL})
-target_link_libraries(main ${GLFW_LIBRARIES} ${VULKAN_LIBRARIES} ${FFMPEG_LIBRARIES} ${PORTAUDIO_LIBRARIES})
-add_dependencies(main shaders)
+add_executable(avis ${SRC_AVIS_ALL} ${INC_AVIS_ALL})
+target_link_libraries(avis ${GLFW_LIBRARIES} ${VULKAN_LIBRARIES} ${FFMPEG_LIBRARIES} ${PORTAUDIO_LIBRARIES})
+add_dependencies(avis shaders)

@@ -1,5 +1,7 @@
 # Audio Spectrum Visualization using Vulkan
-Experimental Project. Compile using CMake.
+Experimental Project.
+- Compile using CMake.
+- Execute using `avis <path-to-audio-file>`.
 
 ## Dependencies
 | Name                     | Link                                                           |
