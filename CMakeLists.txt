@@ -67,10 +67,4 @@ add_custom_target(shaders DEPENDS
 
 add_executable(main ${SRC_AVIS_ALL} ${INC_AVIS_ALL})
 target_link_libraries(main ${GLFW_LIBRARIES} ${VULKAN_LIBRARIES} ${FFMPEG_LIBRARIES} ${PORTAUDIO_LIBRARIES})
-
 add_dependencies(main shaders)
-
-
-# audio-playback example
-add_executable(audio "examples/audio/main.cpp")
-target_link_libraries(audio ${FFMPEG_LIBRARIES} ${PORTAUDIO_LIBRARIES})
