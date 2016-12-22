@@ -90,10 +90,8 @@ void rfft(real_t* data, real_t* dst) {
 
     // convert real-data to complex data and shuffle
     auto buffer = std::array<std::complex<real_t>, N>();
-    for (std::size_t i = 0; i < N; i++) {
-        auto const j = lut_shuffle[i];
-        buffer[i] = {data[j] * lut_window[j]};                  // TODO: optimize for read access
-    }
+    for (std::size_t i = 0; i < N; i++)
+        buffer[lut_shuffle[i]] = {data[i] * lut_window[i]};
 
     // perform fft
     for (std::uint64_t groups = N/2; groups > 0; groups >>=1) {
