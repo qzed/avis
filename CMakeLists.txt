@@ -11,6 +11,7 @@ find_package(Vulkan    REQUIRED)
 find_package(GLFW      REQUIRED)
 find_package(PortAudio REQUIRED)
 find_package(FFMPEG    REQUIRED)
+find_package(Boost     REQUIRED)
 find_program(EXEC_GLSLANG glslangValidator)
 
 
@@ -32,6 +33,7 @@ include_directories(
     ${GLFW_INCLUDE_DIRS}
     ${PORTAUDIO_INCLUDE_DIRS}
     ${FFMPEG_INCLUDE_DIRS}
+    ${Boost_INCLUDE_DIRS}
 )
 
 aux_source_directory(src/avis            SRC_AVIS)
