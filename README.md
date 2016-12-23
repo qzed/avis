@@ -13,3 +13,4 @@ Interesting features:
 | glslang/glslangValidator | https://www.khronos.org/opengles/sdk/tools/Reference-Compiler/ |
 | ffmpeg                   | https://ffmpeg.org/                                            |
 | PortAudio                | http://www.portaudio.com/                                      |
+| boost                    | http://www.boost.org/                                          |
